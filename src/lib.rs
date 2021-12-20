@@ -16,9 +16,9 @@
 //! ```txt
 //!
 //! Vechonk<str>
-//! ------------------------
-//! | ptr   | len   | cap  |
-//! ---|---------------------
+//! ---------------------------------
+//! | ptr   | len   | cap  | filled |
+//! ---|-----------------------------
 //!    |
 //!    |___
 //!        |
@@ -37,37 +37,54 @@ mod test;
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
-use core::ptr::NonNull;
+use core::ptr::{NonNull, Pointee};
+use core::{mem, ptr};
 
 /// chonky af
 ///
-/// only works for copy types, but this is WIP and will be removed
-pub struct Vechonk<T: ?Sized + Copy> {
+/// note: it does not run destructors for now, thankfully that is 100% safe :))))
+pub struct Vechonk<T: ?Sized> {
+    /// A pointer to the first element
     ptr: NonNull<u8>,
+    /// How many elements the Vechonk has
     len: usize,
+    /// How much memory the Vechonk owns
     cap: usize,
+    /// How much memory has been used already for elements + meta
+    filled: usize,
     _marker: PhantomData<T>,
 }
 
-impl<T: ?Sized + Copy> Vechonk<T> {
-    pub fn len(&self) -> usize {
+impl<T: ?Sized> Vechonk<T> {
+    pub const fn len(&self) -> usize {
         self.len
     }
 
-    pub fn new() -> Self {
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Create a new empty Vechonk that doesn't allocate anything
+    pub const fn new() -> Self {
         Self {
             // SAFETY: 1 is not 0
             ptr: unsafe { NonNull::new_unchecked(1 as *mut u8) },
             len: 0,
             cap: 0,
+            filled: 0,
             _marker: PhantomData,
         }
     }
 
+    /// Create a new Vechonk that allocates `capacity` bytes. `capacity` gets shrunken down
+    /// to the next multiple of the alignment of the metadata of `T`
     pub fn with_capacity(capacity: usize) -> Self {
+        let capacity = capacity - (capacity % mem::align_of::<Meta<T>>());
+
         let mut vechonk = Self::new();
 
         if capacity == 0 {
@@ -81,6 +98,36 @@ impl<T: ?Sized + Copy> Vechonk<T> {
         vechonk
     }
 
+    pub fn push(&mut self, element: Box<T>) {
+        assert_eq!(self.len, 0, "we only support a single element for now :)");
+
+        let element_size = mem::size_of_val(element.as_ref());
+
+        let ptr = element.as_ref();
+        let meta = ptr::metadata(ptr);
+
+        let meta_size = mem::size_of::<Meta<T>>();
+
+        // just panic here instead of a proper realloc
+        assert!(element_size + meta_size < self.cap - self.filled);
+
+        // SAFETY: none for now
+        unsafe {
+            ptr::copy_nonoverlapping(ptr as *const T as *mut u8, self.ptr.as_ptr(), element_size);
+        }
+
+        // SAFETY: none for now
+        let meta_ptr = unsafe { self.ptr.as_ptr().add(self.cap - meta_size) };
+        let meta_ptr = meta_ptr as *mut _;
+
+        // SAFETY: none for now
+        unsafe {
+            *meta_ptr = meta;
+        }
+
+        self.len += 1;
+    }
+
     /// Grows the `Vechonk` to a new capacity. This will not copy any elements. This will put the `Vechonk`
     /// into an invalid state, since the `len` is still the length of the old allocation.
     ///
@@ -88,8 +135,7 @@ impl<T: ?Sized + Copy> Vechonk<T> {
     /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
     /// `self.ptr` before calling this function.
     unsafe fn grow_to(&mut self, size: NonZeroUsize) {
-        // SAFETY: 1 is not 0 and a power of two. `size > usize::MAX` must always be true
-        let layout = unsafe { Layout::from_size_align_unchecked(size.get(), 1) };
+        let layout = Layout::from_size_align(size.get(), mem::align_of::<Meta<T>>()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size
         let alloced_ptr = unsafe { alloc::alloc::alloc(layout) };
@@ -101,17 +147,24 @@ impl<T: ?Sized + Copy> Vechonk<T> {
     }
 }
 
-
 // we can only drop copy for now because destructors 🤮
-impl<T: ?Sized + Copy> Drop for Vechonk<T> {
+impl<T: ?Sized> Drop for Vechonk<T> {
     fn drop(&mut self) {
         if self.cap == 0 {
             return;
         }
 
         // SAFETY: 1 is not 0 and a power of two. `size > usize::MAX` must always be true
-        let layout = unsafe { Layout::from_size_align_unchecked(self.cap, 1) };
+        let layout = Layout::from_size_align(self.cap, mem::align_of::<Meta<T>>()).unwrap();
 
         unsafe { alloc::alloc::dealloc(self.ptr.as_ptr(), layout) };
     }
 }
+
+impl<T: ?Sized> Default for Vechonk<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+type Meta<T> = <T as Pointee>::Metadata;

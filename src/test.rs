@@ -41,3 +41,23 @@ fn push_single_unsized_elem() {
 
     assert_eq!(chonk.len(), 1);
 }
+
+#[test]
+fn push_two_sized_elem() {
+    let mut chonk = Vechonk::<u8>::with_capacity(100);
+
+    chonk.push(Box::new(1));
+    chonk.push(Box::new(2));
+
+    assert_eq!(chonk.len(), 2);
+}
+
+#[test]
+fn push_two_unsized_elem() {
+    let mut chonk = Vechonk::<str>::with_capacity(100);
+
+    chonk.push("hello".into());
+    chonk.push("uwu".into());
+
+    assert_eq!(chonk.len(), 2);
+}

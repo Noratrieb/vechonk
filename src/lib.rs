@@ -54,8 +54,8 @@ pub struct Vechonk<T: ?Sized> {
     len: usize,
     /// How much memory the Vechonk owns
     cap: usize,
-    /// How much memory has been used already for elements + meta
-    filled: usize,
+    /// How much memory has been used by the elements
+    elem_size: usize,
     _marker: PhantomData<T>,
 }
 
@@ -75,7 +75,7 @@ impl<T: ?Sized> Vechonk<T> {
             ptr: unsafe { NonNull::new_unchecked(1 as *mut u8) },
             len: 0,
             cap: 0,
-            filled: 0,
+            elem_size: 0,
             _marker: PhantomData,
         }
     }
@@ -83,7 +83,7 @@ impl<T: ?Sized> Vechonk<T> {
     /// Create a new Vechonk that allocates `capacity` bytes. `capacity` gets shrunken down
     /// to the next multiple of the alignment of the metadata of `T`
     pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = capacity - (capacity % mem::align_of::<Meta<T>>());
+        let capacity = capacity - (capacity % Self::meta_align());
 
         let mut vechonk = Self::new();
 
@@ -99,21 +99,21 @@ impl<T: ?Sized> Vechonk<T> {
     }
 
     pub fn push(&mut self, element: Box<T>) {
-        assert_eq!(self.len, 0, "we only support a single element for now :)");
-
         let element_size = mem::size_of_val(element.as_ref());
 
         let ptr = element.as_ref();
         let meta = ptr::metadata(ptr);
 
-        let meta_size = mem::size_of::<Meta<T>>();
+        let meta_size = Self::meta_size();
 
         // just panic here instead of a proper realloc
-        assert!(element_size + meta_size < self.cap - self.filled);
+        assert!(!self.needs_grow(element_size + meta_size));
 
         // SAFETY: none for now
         unsafe {
-            ptr::copy_nonoverlapping(ptr as *const T as *mut u8, self.ptr.as_ptr(), element_size);
+            let target_ptr = self.ptr.as_ptr().add(self.elem_size);
+
+            ptr::copy_nonoverlapping(ptr as *const T as _, target_ptr, element_size);
         }
 
         // SAFETY: none for now
@@ -125,6 +125,7 @@ impl<T: ?Sized> Vechonk<T> {
             *meta_ptr = meta;
         }
 
+        self.elem_size += element_size;
         self.len += 1;
     }
 
@@ -135,7 +136,7 @@ impl<T: ?Sized> Vechonk<T> {
     /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
     /// `self.ptr` before calling this function.
     unsafe fn grow_to(&mut self, size: NonZeroUsize) {
-        let layout = Layout::from_size_align(size.get(), mem::align_of::<Meta<T>>()).unwrap();
+        let layout = Layout::from_size_align(size.get(), Self::meta_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size
         let alloced_ptr = unsafe { alloc::alloc::alloc(layout) };
@@ -144,6 +145,22 @@ impl<T: ?Sized> Vechonk<T> {
             NonNull::new(alloced_ptr).unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
 
         self.cap = size.get();
+    }
+
+    fn needs_grow(&self, additional_size: usize) -> bool {
+        additional_size > self.cap - (self.elem_size + self.meta_section_size())
+    }
+
+    fn meta_section_size(&self) -> usize {
+        self.len * mem::size_of::<Meta<T>>()
+    }
+
+    fn meta_align() -> usize {
+        mem::align_of::<Meta<T>>()
+    }
+
+    fn meta_size() -> usize {
+        mem::size_of::<Meta<T>>()
     }
 }
 

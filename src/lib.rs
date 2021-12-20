@@ -1,3 +1,6 @@
+#![no_std]
+#![feature(ptr_metadata)]
+
 //!
 //! A `Vec<T: ?Sized>`
 //!

@@ -41,6 +41,7 @@ use alloc::boxed::Box;
 use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
+use core::ops::Index;
 use core::ptr::{NonNull, Pointee};
 use core::{mem, ptr};
 
@@ -81,9 +82,9 @@ impl<T: ?Sized> Vechonk<T> {
     }
 
     /// Create a new Vechonk that allocates `capacity` bytes. `capacity` gets shrunken down
-    /// to the next multiple of the alignment of the metadata of `T`
+    /// to the next multiple of the alignment of usize + metadata of `T`
     pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = capacity - (capacity % Self::meta_align());
+        let capacity = capacity - (capacity % Self::data_align());
 
         let mut vechonk = Self::new();
 
@@ -98,16 +99,19 @@ impl<T: ?Sized> Vechonk<T> {
         vechonk
     }
 
+    /// Pushes a new element into the [`Vechonk`]. Does panic (for now) if there is no more capacity
     pub fn push(&mut self, element: Box<T>) {
         let element_size = mem::size_of_val(element.as_ref());
 
         let ptr = element.as_ref();
         let meta = ptr::metadata(ptr);
 
-        let meta_size = Self::meta_size();
+        let data_size = Self::data_size();
 
         // just panic here instead of a proper realloc
-        assert!(!self.needs_grow(element_size + meta_size));
+        assert!(!self.needs_grow(element_size + data_size));
+
+        let data: PtrData<T> = (self.len, meta);
 
         // SAFETY: none for now
         unsafe {
@@ -117,12 +121,12 @@ impl<T: ?Sized> Vechonk<T> {
         }
 
         // SAFETY: none for now
-        let meta_ptr = unsafe { self.ptr.as_ptr().add(self.cap - meta_size) };
-        let meta_ptr = meta_ptr as *mut _;
+        let data_ptr = unsafe { self.ptr.as_ptr().add(self.cap - data_size) };
+        let data_ptr = data_ptr as *mut _;
 
         // SAFETY: none for now
         unsafe {
-            *meta_ptr = meta;
+            *data_ptr = data;
         }
 
         self.elem_size += element_size;
@@ -136,7 +140,7 @@ impl<T: ?Sized> Vechonk<T> {
     /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
     /// `self.ptr` before calling this function.
     unsafe fn grow_to(&mut self, size: NonZeroUsize) {
-        let layout = Layout::from_size_align(size.get(), Self::meta_align()).unwrap();
+        let layout = Layout::from_size_align(size.get(), Self::data_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size
         let alloced_ptr = unsafe { alloc::alloc::alloc(layout) };
@@ -148,23 +152,31 @@ impl<T: ?Sized> Vechonk<T> {
     }
 
     fn needs_grow(&self, additional_size: usize) -> bool {
-        additional_size > self.cap - (self.elem_size + self.meta_section_size())
+        additional_size > self.cap - (self.elem_size + self.data_section_size())
     }
 
-    fn meta_section_size(&self) -> usize {
-        self.len * mem::size_of::<Meta<T>>()
+    fn data_section_size(&self) -> usize {
+        self.len * mem::size_of::<PtrData<T>>()
     }
 
-    fn meta_align() -> usize {
-        mem::align_of::<Meta<T>>()
+    fn data_align() -> usize {
+        mem::align_of::<PtrData<T>>()
     }
 
-    fn meta_size() -> usize {
-        mem::size_of::<Meta<T>>()
+    fn data_size() -> usize {
+        mem::size_of::<PtrData<T>>()
     }
 }
 
-// we can only drop copy for now because destructors 🤮
+impl<T: ?Sized> Index<usize> for Vechonk<T> {
+    type Output = T;
+
+    fn index(&self, _index: usize) -> &Self::Output {
+        todo!()
+    }
+}
+
+/// don't bother with destructors for now
 impl<T: ?Sized> Drop for Vechonk<T> {
     fn drop(&mut self) {
         if self.cap == 0 {
@@ -172,7 +184,7 @@ impl<T: ?Sized> Drop for Vechonk<T> {
         }
 
         // SAFETY: 1 is not 0 and a power of two. `size > usize::MAX` must always be true
-        let layout = Layout::from_size_align(self.cap, mem::align_of::<Meta<T>>()).unwrap();
+        let layout = Layout::from_size_align(self.cap, mem::align_of::<PtrData<T>>()).unwrap();
 
         unsafe { alloc::alloc::dealloc(self.ptr.as_ptr(), layout) };
     }
@@ -184,4 +196,4 @@ impl<T: ?Sized> Default for Vechonk<T> {
     }
 }
 
-type Meta<T> = <T as Pointee>::Metadata;
+type PtrData<T> = (usize, <T as Pointee>::Metadata);

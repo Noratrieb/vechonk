@@ -87,3 +87,53 @@ fn index() {
     assert_eq!(hello, "hello");
     assert_eq!(uwu, "uwu");
 }
+
+#[test]
+fn grow_from_empty() {
+    let mut chonk = Vechonk::<str>::new();
+
+    assert_eq!(chonk.len(), 0);
+
+    chonk.push("hello".into());
+    chonk.push("uwu".into());
+
+    let hello = &chonk[0];
+    let uwu = &chonk[1];
+
+    assert_eq!(hello, "hello");
+    assert_eq!(uwu, "uwu");
+
+    assert_eq!(chonk.len(), 2);
+}
+
+#[test]
+fn grow_from_alloc() {
+    let mut chonk = Vechonk::<str>::with_capacity(32);
+
+    assert_eq!(chonk.len(), 0);
+
+    chonk.push("hello".into());
+    chonk.push("uwu".into());
+
+    let hello = &chonk[0];
+    let uwu = &chonk[1];
+
+    assert_eq!(hello, "hello");
+    assert_eq!(uwu, "uwu");
+
+    assert_eq!(chonk.len(), 2);
+}
+
+#[test]
+#[ignore] // alignment...
+fn push_alignment() {
+    use core::any::Any;
+
+    let mut chonk = Vechonk::<dyn Any>::with_capacity(96);
+
+    chonk.push(Box::new(0_u8));
+    chonk.push(Box::new(1_u64));
+
+    let _ = chonk[0];
+    let _ = chonk[1];
+}

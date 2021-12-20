@@ -16,14 +16,15 @@
 //! ```txt
 //!
 //!             Vechonk<str>
-//!             ---------------------------------
-//!             | ptr   | len   | cap  | filled |
-//!             ---|---------------|-------------
-//!                |               |
-//!                |               |________________________________________________
-//!                |                                                               |
-//!         Heap   v                                                               v
-//!         ------------------------------------------------------------------------
+//!             ------------------------------------
+//!             | ptr   | len   | cap  | elem_size |
+//!             ---|---------------|--------|-------
+//!                |               |        |
+//!                |               |_______ | ______________________________________
+//!                |                        |                                      |
+//!                |               _________|                                      |
+//!         Heap   v               v                                               v
+//!         -----------------------|-----------------------------------------------
 //! value   | "hello"    | "uwu"   |  <uninit>       | 0 - 5        | 5 - 3        |
 //!         |------------|---------|-----------------|--------------|--------------|
 //!  size   | dynamic    | dynamic |  rest of alloc  | usize + meta | usize + meta |
@@ -85,7 +86,7 @@ impl<T: ?Sized> Vechonk<T> {
     pub const fn new() -> Self {
         Self {
             // SAFETY: 1 is not 0
-            ptr: unsafe { NonNull::new_unchecked(1 as *mut u8) },
+            ptr: NonNull::dangling(),
             len: 0,
             cap: 0,
             elem_size: 0,
@@ -96,7 +97,7 @@ impl<T: ?Sized> Vechonk<T> {
     /// Create a new Vechonk that allocates `capacity` bytes. `capacity` gets shrunken down
     /// to the next multiple of the alignment of usize + metadata of `T`
     pub fn with_capacity(capacity: usize) -> Self {
-        let capacity = capacity - (capacity % Self::data_align());
+        let capacity = force_align(capacity, Self::data_align());
 
         let mut vechonk = Self::new();
 
@@ -112,6 +113,7 @@ impl<T: ?Sized> Vechonk<T> {
     }
 
     /// Pushes a new element into the [`Vechonk`]. Does panic (for now) if there is no more capacity
+    /// todo: don't take a box but some U that can be unsized into T
     pub fn push(&mut self, element: Box<T>) {
         let elem_size = mem::size_of_val(element.as_ref());
 
@@ -121,7 +123,9 @@ impl<T: ?Sized> Vechonk<T> {
         let data_size = mem::size_of::<PtrData<T>>();
 
         // just panic here instead of a proper realloc
-        assert!(!self.needs_grow(elem_size + data_size));
+        if self.needs_grow(elem_size + data_size) {
+            self.regrow(self.cap + elem_size + data_size);
+        }
 
         let elem_offset = self.elem_size;
 
@@ -166,8 +170,51 @@ impl<T: ?Sized> Vechonk<T> {
         }
     }
 
+    fn regrow(&mut self, min_size: usize) {
+        // new_cap must be properly "aligned" for `PtrData<T>`
+        let new_cap = force_align(min_size * 2, Self::data_align());
+
+        let old_ptr = self.ptr.as_ptr();
+        let old_cap = self.cap;
+
+        let last_data_index = self.len.saturating_sub(1);
+        let old_data_offset = self.offset_for_data(last_data_index);
+
+        // SAFETY: new_cap can't be 0 because of the +1
+        //         We will copy the elements over
+        unsafe {
+            self.grow_to(NonZeroUsize::new_unchecked(new_cap));
+        }
+
+        // copy the elements first
+        // SAFETY: both pointers point to the start of allocations smaller than `self.elem_size` and own them
+        unsafe {
+            ptr::copy_nonoverlapping(old_ptr, self.ptr.as_ptr(), self.elem_size);
+        }
+
+        // then copy the data
+        // SAFETY: both pointers have been offset by less than `self.cap`, and the `data_section_size` fills the allocation perfectly
+        unsafe {
+            let new_data_ptr = self.ptr.as_ptr().add(self.offset_for_data(last_data_index));
+
+            ptr::copy_nonoverlapping(
+                old_ptr.add(old_data_offset),
+                new_data_ptr,
+                self.data_section_size(),
+            )
+        }
+
+        // now free the old data
+        // SAFETY: This was previously allocated and is not used anymore
+        unsafe {
+            Self::dealloc(old_cap, old_ptr);
+        }
+    }
+
     /// Grows the `Vechonk` to a new capacity. This will not copy any elements. This will put the `Vechonk`
     /// into an invalid state, since the `len` is still the length of the old allocation.
+    ///
+    /// This doesn't free any memory
     ///
     /// # Safety
     /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
@@ -176,7 +223,17 @@ impl<T: ?Sized> Vechonk<T> {
         let layout = Layout::from_size_align(size.get(), Self::data_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size
-        let alloced_ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
+        let alloced_ptr;
+
+        // we only care about it being zeroed for debugging since it makes it easier
+        #[cfg(debug_assertions)]
+        unsafe {
+            alloced_ptr = alloc::alloc::alloc_zeroed(layout)
+        }
+        #[cfg(not(debug_assertions))]
+        unsafe {
+            alloced_ptr = alloc::alloc::alloc(layout)
+        }
 
         self.ptr =
             NonNull::new(alloced_ptr).unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
@@ -201,15 +258,30 @@ impl<T: ?Sized> Vechonk<T> {
 
         // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
         //         The pointer is calculated from the offset, which is also valid
+        //         The pointer is not aligned btw, todo lol
         unsafe { &*elem_meta_ptr }
+    }
+
+    // SAFETY: The allocation must be owned by `ptr` and have the length `cap`
+    unsafe fn dealloc(cap: usize, ptr: *mut u8) {
+        if cap == 0 {
+            return;
+        }
+
+        // SAFETY: Align must be valid since it's obtained using `align_of`
+        let layout =
+            unsafe { Layout::from_size_align_unchecked(cap, mem::align_of::<PtrData<T>>()) };
+
+        unsafe { alloc::alloc::dealloc(ptr, layout) };
     }
 
     /// Returns a multiple of the alignment of `PtrData<T>`, since `self.cap` is one, and so is the size
     const fn offset_for_data(&self, index: usize) -> usize {
-        self.cap - (mem::size_of::<PtrData<T>>() * (index + 1))
+        self.cap
+            .saturating_sub(mem::size_of::<PtrData<T>>() * (index + 1))
     }
 
-    const fn needs_grow(&self, additional_size: usize) -> bool {
+    fn needs_grow(&self, additional_size: usize) -> bool {
         additional_size > self.cap - (self.elem_size + self.data_section_size())
     }
 
@@ -248,14 +320,9 @@ impl<T: ?Sized> Index<usize> for Vechonk<T> {
 /// don't bother with destructors for now
 impl<T: ?Sized> Drop for Vechonk<T> {
     fn drop(&mut self) {
-        if self.cap == 0 {
-            return;
+        unsafe {
+            Self::dealloc(self.cap, self.ptr.as_ptr());
         }
-
-        // SAFETY: 1 is not 0 and a power of two. `size > usize::MAX` must always be true
-        let layout = Layout::from_size_align(self.cap, mem::align_of::<PtrData<T>>()).unwrap();
-
-        unsafe { alloc::alloc::dealloc(self.ptr.as_ptr(), layout) };
     }
 }
 
@@ -263,4 +330,8 @@ impl<T: ?Sized> Default for Vechonk<T> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+const fn force_align(size: usize, align: usize) -> usize {
+    size - (size % align)
 }

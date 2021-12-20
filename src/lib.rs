@@ -8,29 +8,29 @@
 //! It's implemented by laying out the elements in memory contiguously like [`alloc::vec::Vec`]
 //!
 //! # Layout
-//!//!
+//!
 //! A [`Vechonk`] is 3 `usize` long. It owns a single allocation, containing the elements and the metadata.
 //! The elements are laid out contiguously from the front, while the metadata is laid out contiguously from the back.
 //! Both grow towards the center until they meet and get realloced to separate them again.
 //!
 //! ```txt
 //!
-//! Vechonk<str>
-//! ---------------------------------
-//! | ptr   | len   | cap  | filled |
-//! ---|-----------------------------
-//!    |
-//!    |___
-//!        |
-//! Heap   v
-//! ------------------------------------------------------------------------
-//! | "hello"   | "uwu"    |  <uninit>       | 0 - 5        | 5 - 3        |
-//! |-----------|----------|-----------------|--------------|--------------|
-//! | dynamic   | dynamic  |  rest of alloc  | usize + meta | usize + meta |
-//! --------------------------------------------|--------------|------------
-//!     ^            ^                          |              |
-//!     |___________ | _________________________|              |
-//!                  |_________________________________________|
+//!             Vechonk<str>
+//!             ---------------------------------
+//!             | ptr   | len   | cap  | filled |
+//!             ---|---------------|-------------
+//!                |               |
+//!                |               |________________________________________________
+//!                |                                                               |
+//!         Heap   v                                                               v
+//!         ------------------------------------------------------------------------
+//! value   | "hello"    | "uwu"   |  <uninit>       | 0 - 5        | 5 - 3        |
+//!         |------------|---------|-----------------|--------------|--------------|
+//!  size   | dynamic    | dynamic |  rest of alloc  | usize + meta | usize + meta |
+//!         --------------------------------------------|--------------|------------
+//!             ^            ^                          |              |
+//!             |___________ | _________________________|              |
+//!                          |_________________________________________|
 //! ```
 
 mod test;
@@ -55,9 +55,21 @@ pub struct Vechonk<T: ?Sized> {
     len: usize,
     /// How much memory the Vechonk owns
     cap: usize,
-    /// How much memory has been used by the elements
+    /// How much memory has been used by the elements, where the next element starts
     elem_size: usize,
     _marker: PhantomData<T>,
+}
+
+struct PtrData<T: ?Sized> {
+    offset: usize,
+    meta: <T as Pointee>::Metadata,
+}
+
+impl<T: ?Sized> Copy for PtrData<T> {}
+impl<T: ?Sized> Clone for PtrData<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<T: ?Sized> Vechonk<T> {
@@ -101,36 +113,57 @@ impl<T: ?Sized> Vechonk<T> {
 
     /// Pushes a new element into the [`Vechonk`]. Does panic (for now) if there is no more capacity
     pub fn push(&mut self, element: Box<T>) {
-        let element_size = mem::size_of_val(element.as_ref());
+        let elem_size = mem::size_of_val(element.as_ref());
 
-        let ptr = element.as_ref();
-        let meta = ptr::metadata(ptr);
+        let elem_ptr = Box::into_raw(element);
+        let meta = ptr::metadata(elem_ptr);
 
-        let data_size = Self::data_size();
+        let data_size = mem::size_of::<PtrData<T>>();
 
         // just panic here instead of a proper realloc
-        assert!(!self.needs_grow(element_size + data_size));
+        assert!(!self.needs_grow(elem_size + data_size));
 
-        let data: PtrData<T> = (self.len, meta);
+        let elem_offset = self.elem_size;
 
-        // SAFETY: none for now
+        let data = PtrData {
+            offset: elem_offset,
+            meta,
+        };
+
+        // Copy the element to the new location
+        // SAFETY: `self.elem_size` can't be longer than the allocation, because `PtrData<T>` needs space as well
+        let dest_ptr = unsafe { self.ptr.as_ptr().add(elem_offset) };
+
+        // SAFETY: `elem_ptr` comes from `Box`, and is therefore valid to read from for the size
+        //         We have made sure above that we have more than `elem_size` bytes free
+        //         The two allocations cannot overlap, since the `Box` owned its contents, and so do we
         unsafe {
-            let target_ptr = self.ptr.as_ptr().add(self.elem_size);
-
-            ptr::copy_nonoverlapping(ptr as *const T as _, target_ptr, element_size);
+            ptr::copy_nonoverlapping::<u8>(elem_ptr as _, dest_ptr, elem_size);
         }
 
-        // SAFETY: none for now
-        let data_ptr = unsafe { self.ptr.as_ptr().add(self.cap - data_size) };
-        let data_ptr = data_ptr as *mut _;
+        let data_offset = self.offset_for_data(self.len);
 
-        // SAFETY: none for now
+        // SAFETY: The offset will always be less than `self.cap`, because we can't have more than `self.len` `PtrData`
+        let data_ptr = unsafe { self.ptr.as_ptr().add(data_offset) };
+        let data_ptr = data_ptr as *mut PtrData<T>;
+
+        // SAFETY: The pointer is aligned, because `self.ptr` and `self.cap` are
+        //         It's not out of bounds for our allocation, see above
         unsafe {
             *data_ptr = data;
         }
 
-        self.elem_size += element_size;
+        self.elem_size += elem_size;
         self.len += 1;
+
+        // SAFETY: This was allocated by `Box`, so we know that it is valid.
+        //         The ownership of the value was transferred to `Vechonk` by copying it out
+        unsafe {
+            alloc::alloc::dealloc(
+                elem_ptr as _,
+                Layout::from_size_align(elem_size, mem::align_of_val(&*elem_ptr)).unwrap(),
+            )
+        }
     }
 
     /// Grows the `Vechonk` to a new capacity. This will not copy any elements. This will put the `Vechonk`
@@ -143,7 +176,7 @@ impl<T: ?Sized> Vechonk<T> {
         let layout = Layout::from_size_align(size.get(), Self::data_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size
-        let alloced_ptr = unsafe { alloc::alloc::alloc(layout) };
+        let alloced_ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
 
         self.ptr =
             NonNull::new(alloced_ptr).unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));
@@ -151,28 +184,64 @@ impl<T: ?Sized> Vechonk<T> {
         self.cap = size.get();
     }
 
-    fn needs_grow(&self, additional_size: usize) -> bool {
+    unsafe fn get_unchecked(&self, index: usize) -> &T {
+        let data_offset = self.offset_for_data(index);
+
+        // SAFETY: We can assume that the index is valid.
+        let data_ptr = unsafe { self.ptr.as_ptr().add(data_offset) };
+        let data_ptr = data_ptr as *mut PtrData<T>;
+
+        // SAFETY: The pointer is aligned because `self.ptr` is aligned and `data_offset` is a multiple of the alignment
+        //         The value behind it is always a `PtrData<T>`
+        let data = unsafe { *data_ptr };
+
+        let elem_ptr = unsafe { self.ptr.as_ptr().add(data.offset) };
+
+        let elem_meta_ptr = ptr::from_raw_parts(elem_ptr as *const (), data.meta);
+
+        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
+        //         The pointer is calculated from the offset, which is also valid
+        unsafe { &*elem_meta_ptr }
+    }
+
+    /// Returns a multiple of the alignment of `PtrData<T>`, since `self.cap` is one, and so is the size
+    const fn offset_for_data(&self, index: usize) -> usize {
+        self.cap - (mem::size_of::<PtrData<T>>() * (index + 1))
+    }
+
+    const fn needs_grow(&self, additional_size: usize) -> bool {
         additional_size > self.cap - (self.elem_size + self.data_section_size())
     }
 
-    fn data_section_size(&self) -> usize {
+    const fn data_section_size(&self) -> usize {
         self.len * mem::size_of::<PtrData<T>>()
     }
 
-    fn data_align() -> usize {
+    const fn data_align() -> usize {
         mem::align_of::<PtrData<T>>()
     }
 
-    fn data_size() -> usize {
-        mem::size_of::<PtrData<T>>()
+    /// used for debugging memory layout
+    /// safety: cap must be 96
+    #[allow(dead_code)]
+    #[doc(hidden)]
+    pub unsafe fn debug_chonk(&self) {
+        let array = unsafe { *(self.ptr.as_ptr() as *mut [u8; 96]) };
+
+        panic!("{:?}", array)
     }
 }
 
 impl<T: ?Sized> Index<usize> for Vechonk<T> {
     type Output = T;
 
-    fn index(&self, _index: usize) -> &Self::Output {
-        todo!()
+    fn index(&self, index: usize) -> &Self::Output {
+        if index >= self.len {
+            panic!("Out of bounds, index {} for len {}", index, self.len);
+        }
+
+        // SAFETY: The index is not out of bounds
+        unsafe { self.get_unchecked(index) }
     }
 }
 
@@ -195,5 +264,3 @@ impl<T: ?Sized> Default for Vechonk<T> {
         Self::new()
     }
 }
-
-type PtrData<T> = (usize, <T as Pointee>::Metadata);

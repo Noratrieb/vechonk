@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(ptr_metadata)]
+#![feature(unsize)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 //!
@@ -34,6 +35,7 @@
 //!                          ╰─────────────────────────────────────────╯
 //! ```
 
+mod iter;
 mod test;
 
 extern crate alloc;
@@ -45,6 +47,8 @@ use core::num::NonZeroUsize;
 use core::ops::{Index, IndexMut};
 use core::ptr::{NonNull, Pointee};
 use core::{mem, ptr};
+
+pub use iter::Iter;
 
 /// chonky af
 ///
@@ -233,6 +237,10 @@ impl<T: ?Sized> Vechonk<T> {
         let return_box = unsafe { Box::from_raw(box_fat_ptr) };
 
         Some(return_box)
+    }
+
+    pub fn iter(&self) -> Iter<T> {
+        Iter::new(self)
     }
 
     /// Get a reference to an element at the index. Returns `None` if the index is out of bounds

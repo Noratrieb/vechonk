@@ -133,8 +133,8 @@ fn push_alignment() {
 
     let mut chonk = Vechonk::<dyn Any>::with_capacity(4096);
 
-    chonk.push(Box::new(0_u8));
     chonk.push(Box::new(BigAlign(5)));
+    chonk.push(Box::new(0_u8));
     chonk.push(Box::new(1_u64));
 
     let _ = chonk[0];

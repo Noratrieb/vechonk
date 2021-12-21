@@ -117,7 +117,7 @@ impl<T: ?Sized> Vechonk<T> {
     pub fn push(&mut self, element: Box<T>) {
         let elem_size = mem::size_of_val(element.as_ref());
 
-        let elem_align = mem::align_of_val(&element);
+        let elem_align = mem::align_of_val(element.as_ref());
         let elem_ptr = Box::into_raw(element);
         let meta = ptr::metadata(elem_ptr);
 
@@ -155,6 +155,7 @@ impl<T: ?Sized> Vechonk<T> {
         // SAFETY: `elem_ptr` comes from `Box`, and is therefore valid to read from for the size
         //         We have made sure above that we have more than `elem_size` bytes free
         //         The two allocations cannot overlap, since the `Box` owned its contents, and so do we
+        //         `dest_ptr` has been aligned above
         unsafe {
             ptr::copy_nonoverlapping::<u8>(elem_ptr as _, dest_ptr, elem_size);
         }

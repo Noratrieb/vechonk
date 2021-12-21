@@ -3,6 +3,9 @@
 use crate::Vechonk;
 use alloc::boxed::Box;
 
+#[repr(align(2048))]
+struct BigAlign(u8);
+
 #[test]
 fn new() {
     let chonk = Vechonk::<()>::new();
@@ -128,10 +131,33 @@ fn grow_from_alloc() {
 fn push_alignment() {
     use core::any::Any;
 
-    let mut chonk = Vechonk::<dyn Any>::with_capacity(96);
+    let mut chonk = Vechonk::<dyn Any>::with_capacity(4096);
+
+    chonk.push(Box::new(0_u8));
+    chonk.push(Box::new(BigAlign(5)));
+    chonk.push(Box::new(1_u64));
+
+    let _ = chonk[0];
+    let _ = chonk[1];
+}
+
+#[test]
+fn grow_alignment() {
+    use core::any::Any;
+
+    let mut chonk = Vechonk::<dyn Any>::with_capacity(32);
 
     chonk.push(Box::new(0_u8));
     chonk.push(Box::new(1_u64));
+    chonk.push(Box::new(0_u128));
+    chonk.push(Box::new(BigAlign(5)));
+    chonk.push(Box::new(8_u128));
+    chonk.push(Box::new("dsajkfhdsajklfdsklaöfjdklsöjfkldsfjlkds"));
+    chonk.push(Box::new(4_u128));
+    chonk.push(Box::new(5_u128));
+    chonk.push(Box::new(BigAlign(5)));
+    chonk.push(Box::new(6_u128));
+    chonk.push(Box::new(3_u128));
 
     let _ = chonk[0];
     let _ = chonk[1];

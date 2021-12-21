@@ -107,7 +107,7 @@ impl<T: ?Sized> Vechonk<T> {
 
         // SAFETY: capacity has been checked to not be 0 and the len is 0
         unsafe {
-            vechonk.grow_to(NonZeroUsize::new_unchecked(capacity));
+            vechonk.realloc(NonZeroUsize::new_unchecked(capacity));
         }
         vechonk
     }
@@ -238,7 +238,7 @@ impl<T: ?Sized> Vechonk<T> {
         // SAFETY: new_cap can't be 0 because of the +1
         //         We will copy the elements over
         unsafe {
-            self.grow_to(NonZeroUsize::new_unchecked(new_cap));
+            self.realloc(NonZeroUsize::new_unchecked(new_cap));
         }
 
         // copy the elements first
@@ -266,15 +266,15 @@ impl<T: ?Sized> Vechonk<T> {
         }
     }
 
-    /// Grows the `Vechonk` to a new capacity. This will not copy any elements. This will put the `Vechonk`
-    /// into an invalid state, since the `len` is still the length of the old allocation.
+    /// Reallocs the `Vechonk`, setting its capacity to `size`. This will not copy any elements. This will put the `Vechonk`
+    /// into an invalid state, since the `len` is still the length of the elements in the old allocation.
     ///
     /// This doesn't free any memory
     ///
     /// # Safety
     /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
     /// `self.ptr` before calling this function.
-    unsafe fn grow_to(&mut self, size: NonZeroUsize) {
+    unsafe fn realloc(&mut self, size: NonZeroUsize) {
         let layout = Layout::from_size_align(size.get(), Self::data_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size

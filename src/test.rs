@@ -53,8 +53,8 @@ fn push_two_sized_elem() {
     chonk.push(Box::new(2));
 
     assert_eq!(chonk.len(), 2);
-    assert_eq!(chonk.elem_size, 2);
-    assert_eq!(chonk.data_section_size(), 16); // two indecies
+    assert_eq!(chonk.raw.elem_size, 2);
+    assert_eq!(chonk.raw.data_section_size(), 16); // two indecies
 }
 
 #[test]
@@ -65,8 +65,8 @@ fn push_two_unsized_elem() {
     chonk.push("uwu".into());
 
     assert_eq!(chonk.len(), 2);
-    assert_eq!(chonk.elem_size, 8);
-    assert_eq!(chonk.data_section_size(), 32); // two indecies + lengths
+    assert_eq!(chonk.raw.elem_size, 8);
+    assert_eq!(chonk.raw.data_section_size(), 32); // two indecies + lengths
 }
 
 #[test]

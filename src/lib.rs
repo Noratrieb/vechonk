@@ -9,7 +9,7 @@
 //!
 //! # Layout
 //!
-//! A [`Vechonk`] is 3 `usize` long. It owns a single allocation, containing the elements and the metadata.
+//! A [`Vechonk`] is 4 `usize` long. It owns a single allocation, containing the elements and the metadata.
 //! The elements are laid out contiguously from the front, while the metadata is laid out contiguously from the back.
 //! Both grow towards the center until they meet and get realloced to separate them again.
 //!
@@ -42,7 +42,7 @@ use alloc::boxed::Box;
 use core::alloc::Layout;
 use core::marker::PhantomData;
 use core::num::NonZeroUsize;
-use core::ops::Index;
+use core::ops::{Index, IndexMut};
 use core::ptr::{NonNull, Pointee};
 use core::{mem, ptr};
 
@@ -128,6 +128,13 @@ impl<T: ?Sized> Vechonk<T> {
         let required_align_offset =
             unsafe { self.ptr.as_ptr().add(elem_offset).align_offset(elem_align) };
 
+        if required_align_offset == usize::MAX {
+            panic!(
+                "Cannot align pointer for element with size: {}, alignment: {}",
+                elem_size, elem_align
+            );
+        }
+
         // just panic here instead of a proper realloc
         if self.needs_grow(elem_size + data_size + required_align_offset) {
             self.regrow(self.cap + elem_size + data_size);
@@ -176,6 +183,47 @@ impl<T: ?Sized> Vechonk<T> {
             )
         }
     }
+
+    /// Get a reference to an element at the index. Returns `None` if the index is out of bounds
+    pub fn get(&self, index: usize) -> Option<&T> {
+        if index < self.len {
+            // SAFETY: The index has been checked above
+            unsafe { Some(self.get_unchecked(index)) }
+        } else {
+            None
+        }
+    }
+
+    /// Get a mutable reference to an element at the index. Returns `None` if the index is out of bounds
+    pub fn get_mut(&mut self, index: usize) -> Option<&T> {
+        if index < self.len {
+            // SAFETY: The index has been checked above
+            unsafe { Some(self.get_unchecked_mut(index)) }
+        } else {
+            None
+        }
+    }
+
+    /// # Safety
+    /// The index must be in bounds
+    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
+        //         The pointer is calculated from the offset, which is also valid
+        //         The pointer is aligned, because it has been aligned manually in `Self::push`
+        unsafe { &*self.get_unchecked_ptr(index) }
+    }
+
+    /// # Safety
+    /// The index must be in bounds
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
+        //         The pointer is calculated from the offset, which is also valid
+        //         The pointer is aligned, because it has been aligned manually in `Self::push`
+        //         This function takes `*mut self`, so we have exclusive access to ourselves
+        unsafe { &mut *self.get_unchecked_ptr(index) }
+    }
+
+    // private helper methods
 
     fn regrow(&mut self, min_size: usize) {
         // new_cap must be properly "aligned" for `PtrData<T>`
@@ -248,7 +296,10 @@ impl<T: ?Sized> Vechonk<T> {
         self.cap = size.get();
     }
 
-    unsafe fn get_unchecked(&self, index: usize) -> &T {
+    /// Get a raw ptr to an element. Be careful about casting this into a `mut &T`
+    /// # SAFETY
+    /// The index must be in bounds
+    unsafe fn get_unchecked_ptr(&self, index: usize) -> *mut T {
         let data_offset = self.offset_for_data(index);
 
         // SAFETY: We can assume that the index is valid.
@@ -261,12 +312,7 @@ impl<T: ?Sized> Vechonk<T> {
 
         let elem_ptr = unsafe { self.ptr.as_ptr().add(data.offset) };
 
-        let elem_meta_ptr = ptr::from_raw_parts(elem_ptr as *const (), data.meta);
-
-        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
-        //         The pointer is calculated from the offset, which is also valid
-        //         The pointer is not aligned btw, todo lol
-        unsafe { &*elem_meta_ptr }
+        ptr::from_raw_parts_mut(elem_ptr as *mut (), data.meta)
     }
 
     // SAFETY: The allocation must be owned by `ptr` and have the length `cap`
@@ -321,6 +367,17 @@ impl<T: ?Sized> Index<usize> for Vechonk<T> {
 
         // SAFETY: The index is not out of bounds
         unsafe { self.get_unchecked(index) }
+    }
+}
+
+impl<T: ?Sized> IndexMut<usize> for Vechonk<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        if index >= self.len {
+            panic!("Out of bounds, index {} for len {}", index, self.len);
+        }
+
+        // SAFETY: The index is not out of bounds
+        unsafe { self.get_unchecked_mut(index) }
     }
 }
 

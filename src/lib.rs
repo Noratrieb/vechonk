@@ -43,8 +43,12 @@ extern crate alloc;
 
 use crate::raw::RawVechonk;
 use alloc::boxed::Box;
-use core::ops::{Index, IndexMut};
+use core::cmp;
+use core::cmp::Ordering;
+use core::hash::{Hash, Hasher};
+use core::ops::Index;
 
+use crate::iter::IntoIter;
 pub use iter::Iter;
 
 /// chonky af
@@ -91,6 +95,7 @@ impl<T: ?Sized> Vechonk<T> {
         self.raw.pop()
     }
 
+    /// An iterator over the elements yielding shared references
     pub fn iter(&self) -> Iter<T> {
         Iter::new(self)
     }
@@ -105,16 +110,6 @@ impl<T: ?Sized> Vechonk<T> {
         }
     }
 
-    /// Get a mutable reference to an element at the index. Returns `None` if the index is out of bounds
-    pub fn get_mut(&mut self, index: usize) -> Option<&T> {
-        if index < self.len() {
-            // SAFETY: The index has been checked above
-            unsafe { Some(self.get_unchecked_mut(index)) }
-        } else {
-            None
-        }
-    }
-
     /// # Safety
     /// The index must be in bounds
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
@@ -122,16 +117,6 @@ impl<T: ?Sized> Vechonk<T> {
         //         The pointer is calculated from the offset, which is also valid
         //         The pointer is aligned, because it has been aligned manually in `Self::push`
         unsafe { &*self.raw.get_unchecked_ptr(index) }
-    }
-
-    /// # Safety
-    /// The index must be in bounds
-    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
-        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
-        //         The pointer is calculated from the offset, which is also valid
-        //         The pointer is aligned, because it has been aligned manually in `Self::push`
-        //         This function takes `*mut self`, so we have exclusive access to ourselves
-        unsafe { &mut *self.raw.get_unchecked_ptr(index) }
     }
 
     /// used for debugging memory layout
@@ -159,17 +144,6 @@ impl<T: ?Sized> Index<usize> for Vechonk<T> {
     }
 }
 
-impl<T: ?Sized> IndexMut<usize> for Vechonk<T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        if index >= self.len() {
-            panic!("Out of bounds, index {} for len {}", index, self.len());
-        }
-
-        // SAFETY: The index is not out of bounds
-        unsafe { self.get_unchecked_mut(index) }
-    }
-}
-
 /// don't bother with destructors for now
 impl<T: ?Sized> Drop for Vechonk<T> {
     fn drop(&mut self) {
@@ -180,12 +154,101 @@ impl<T: ?Sized> Drop for Vechonk<T> {
     }
 }
 
+impl<T: ?Sized> IntoIterator for Vechonk<T> {
+    type Item = Box<T>;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter::new(self)
+    }
+}
+
+// default trait impls
+
 impl<T: ?Sized> Default for Vechonk<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
+impl<T> PartialEq for Vechonk<T>
+where
+    T: ?Sized + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    }
+}
+
+impl<T> Eq for Vechonk<T> where T: ?Sized + PartialEq + Eq {}
+
+impl<T> PartialOrd for Vechonk<T>
+where
+    T: ?Sized + PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // see core::slice::cmp::SlicePartialOrd::partial_compare
+
+        let len = cmp::min(self.len(), other.len());
+        for i in 0..len {
+            // SAFETY: We did the bounds check above
+            let ordering = unsafe { self.get_unchecked(i).partial_cmp(other.get_unchecked(i)) };
+
+            match ordering {
+                Some(Ordering::Equal) => {}
+                non_eq => return non_eq,
+            }
+        }
+
+        self.len().partial_cmp(&other.len())
+    }
+}
+
+impl<T> Ord for Vechonk<T>
+where
+    T: ?Sized + PartialOrd + Ord,
+{
+    fn cmp(&self, other: &Self) -> Ordering {
+        // see core::slice::cmp::SliceOrd::compare
+
+        let len = cmp::min(self.len(), other.len());
+
+        for i in 0..len {
+            // SAFETY: We did the bounds check above
+            let ordering = unsafe { self.get_unchecked(i).cmp(other.get_unchecked(i)) };
+
+            match ordering {
+                Ordering::Equal => {}
+                non_eq => return non_eq,
+            }
+        }
+
+        self.len().cmp(&other.len())
+    }
+}
+
+impl<T> Hash for Vechonk<T>
+where
+    T: ?Sized + Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.iter().for_each(|elem| elem.hash(state))
+    }
+}
+
 const fn force_align(size: usize, align: usize) -> usize {
     size - (size % align)
+}
+
+#[macro_export]
+macro_rules! vechonk {
+    ($($x:expr),* $(,)?) => {{
+        let mut chonk = $crate::Vechonk::new();
+        $( chonk.push($x); )*
+        chonk
+    }};
 }

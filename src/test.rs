@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use crate::Vechonk;
+use crate::{vechonk, Vechonk};
 use alloc::boxed::Box;
 
 #[repr(align(2048))]
@@ -168,23 +168,71 @@ fn popping() {
     let mut chonk = Vechonk::<str>::with_capacity(512);
 
     chonk.push("hello".into());
-    //chonk.push("uwu".into());
-    //chonk.push("I'm popping off!".into());
+    chonk.push("uwu".into());
+    chonk.push("I'm popping off!".into());
 
-    //let popping = chonk.pop().unwrap();
-    //let uwu = chonk.pop().unwrap();
+    let popping = chonk.pop().unwrap();
+    let uwu = chonk.pop().unwrap();
     let hello = chonk.pop().unwrap();
     let end = chonk.pop();
 
-    //assert_eq!(popping.as_ref(), "hello");
-    //assert_eq!(uwu.as_ref(), "uwu");
+    assert_eq!(popping.as_ref(), "I'm popping off!");
+    assert_eq!(uwu.as_ref(), "uwu");
     assert_eq!(hello.as_ref(), "hello");
     assert_eq!(end, None);
+}
 
-    //drop(popping);
-    //drop(uwu);
-    drop(hello);
-    drop(chonk);
+#[test]
+fn iter() {
+    let chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+    let mut iter = chonk.iter();
+
+    assert_eq!(iter.next(), Some("hello"));
+    assert_eq!(iter.next(), Some("uwu"));
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn into_iter() {
+    let chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    let mut iter = chonk.into_iter();
+
+    assert_eq!(iter.next().unwrap().as_ref(), "hello");
+    assert_eq!(iter.next().unwrap().as_ref(), "uwu");
+    assert_eq!(iter.next(), None);
+}
+
+#[test]
+fn partial_eq_eq() {
+    let chonk1 = vechonk![235.0.into(), 325.8.into()];
+    let chonk2 = vechonk![235.0.into(), 325.8.into()];
+
+    assert!(chonk1.eq(&chonk2));
+}
+
+#[test]
+fn partial_eq_ne() {
+    let chonk1: Vechonk<f32> = vechonk![235.0.into(), 325.9.into()];
+    let chonk2: Vechonk<f32> = vechonk![235.0.into(), 325.8.into()];
+
+    assert!(!chonk1.eq(&chonk2));
+}
+
+#[test]
+fn eq_eq() {
+    let chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+    let chonk2: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    assert!(chonk1.eq(&chonk2));
+}
+
+#[test]
+fn eq_ne() {
+    let chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+    let chonk2: Vechonk<str> = vechonk!["hewwo".into(), "owo".into()];
+
+    assert!(!chonk1.eq(&chonk2));
 }
 
 #[test]

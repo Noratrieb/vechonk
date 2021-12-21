@@ -148,8 +148,23 @@ impl<T: ?Sized> RawVechonk<T> {
             return None;
         }
 
-        // SAFETY: `self.len - 1` is the last element, and therefore not out of bounds
-        let data = unsafe { self.get_data(self.len - 1) };
+        // SAFETY: `self.len` cannot be 0 and must therefore be in bounds, we decrement the len below
+        let boxed = unsafe { self.box_elem_unchecked(self.len - 1) };
+
+        // We don't need to care about our memory, we can just decrement the `len` and let the old memory be, it's
+        // now semantically uninitialized
+        self.len -= 1;
+
+        Some(boxed)
+    }
+
+    /// Moves one element into a Box
+    /// # Safety
+    /// The index must not be out of bounds. The element is moved out, so it must be made sure that
+    /// this element can't be used again
+    pub unsafe fn box_elem_unchecked(&self, index: usize) -> Box<T> {
+        // SAFETY: We can rely on `index` not being out of bounds
+        let data = unsafe { self.get_data(index) };
 
         // SAFETY: We can assume that the `offset` from `data` is not out of bounds
         let elem_ptr = unsafe { self.ptr.as_ptr().add(data.offset) };
@@ -179,15 +194,9 @@ impl<T: ?Sized> RawVechonk<T> {
         // SAFETY: See above for both variables. `data.meta` is the valid metadata for the element
         let box_fat_ptr = ptr::from_raw_parts_mut(box_ptr as *mut (), data.meta);
 
-        // We don't need to care about our memory, we can just decrement the `len` and let the old memory be, it's
-        // now semantically uninitialized
-        self.len -= 1;
-
         // SAFETY: We decremented the `len`, so no one else can get access to the element,
         //         therefore it's safe to transfer ownership to the Box here
-        let return_box = unsafe { Box::from_raw(box_fat_ptr) };
-
-        Some(return_box)
+        unsafe { Box::from_raw(box_fat_ptr) }
     }
 
     /// Get a raw ptr to an element. Be careful about casting this into a `mut &T`

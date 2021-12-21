@@ -23,7 +23,7 @@
 //!                │               ╰────────│──────────────────────────────────────╮
 //!                │                        │                                      │
 //!                │               ╭────────╯                                      │
-//!         Heap   ▼               ▼                                               ▼
+//!         Heap   ▼               ▼                      PtrData       PtrData    ▼
 //!         ╭────────────┬─────────┬─────────────────┬──────────────┬──────────────╮
 //! value   │ "hello"    │ "uwu"   │  <uninit>       │ 0 - 5        │ 5 - 3        │
 //!         ├────────────┼─────────┼─────────────────┼──────────────┼──────────────┤
@@ -61,6 +61,7 @@ pub struct Vechonk<T: ?Sized> {
     _marker: PhantomData<T>,
 }
 
+/// The offset + metadata for each element, stored at the end
 struct PtrData<T: ?Sized> {
     offset: usize,
     meta: <T as Pointee>::Metadata,
@@ -74,10 +75,12 @@ impl<T: ?Sized> Clone for PtrData<T> {
 }
 
 impl<T: ?Sized> Vechonk<T> {
+    /// The amount of elements in the `Vechonk`, O(1)
     pub const fn len(&self) -> usize {
         self.len
     }
 
+    /// Whether the `Vechonk` is empty, O(1)
     pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -85,7 +88,6 @@ impl<T: ?Sized> Vechonk<T> {
     /// Create a new empty Vechonk that doesn't allocate anything
     pub const fn new() -> Self {
         Self {
-            // SAFETY: 1 is not 0
             ptr: NonNull::dangling(),
             len: 0,
             cap: 0,
@@ -183,6 +185,54 @@ impl<T: ?Sized> Vechonk<T> {
                 Layout::from_size_align(elem_size, mem::align_of_val(&*elem_ptr)).unwrap(),
             )
         }
+    }
+
+    /// Get the last element, returns `None` if the `Vechonk` is empty
+    pub fn pop(&mut self) -> Option<Box<T>> {
+        if self.is_empty() {
+            return None;
+        }
+
+        // SAFETY: `self.len - 1` is the last element, and therefore not out of bounds
+        let data = unsafe { self.get_data(self.len - 1) };
+
+        // SAFETY: We can assume that the `offset` from `data` is not out of bounds
+        let elem_ptr = unsafe { self.ptr.as_ptr().add(data.offset) };
+
+        // allocate a new `Box` for the return value
+        let elem_fat_ptr = ptr::from_raw_parts_mut::<T>(elem_ptr as *mut (), data.meta);
+        // SAFETY: The metadata has been preserved, and the pointer has been properly aligned and initialized
+        // when the element was added
+        let elem_fat_ref = unsafe { &*elem_fat_ptr };
+
+        let element_box_layout = Layout::for_value(elem_fat_ref);
+
+        // SAFETY: TODO does not work with ZST
+        let box_ptr = unsafe { alloc::alloc::alloc(element_box_layout) };
+
+        if box_ptr.is_null() {
+            alloc::alloc::handle_alloc_error(element_box_layout);
+        }
+
+        let elem_size = mem::size_of_val(elem_fat_ref);
+        // SAFETY: The new allocation doesn't overlap, `box_ptr` was just allocated and is non_null
+        //         For `elem_ptr`, see safety comments above, the size was obtained above as well
+        unsafe {
+            ptr::copy_nonoverlapping(elem_ptr, box_ptr, elem_size);
+        }
+
+        // SAFETY: See above for both variables. `data.meta` is the valid metadata for the element
+        let box_fat_ptr = ptr::from_raw_parts_mut(box_ptr as *mut (), data.meta);
+
+        // We don't need to care about our memory, we can just decrement the `len` and let the old memory be, it's
+        // now semantically uninitialized
+        self.len -= 1;
+
+        // SAFETY: We decremented the `len`, so no one else can get access to the element,
+        //         therefore it's safe to transfer ownership to the Box here
+        let return_box = unsafe { Box::from_raw(box_fat_ptr) };
+
+        Some(return_box)
     }
 
     /// Get a reference to an element at the index. Returns `None` if the index is out of bounds
@@ -297,19 +347,27 @@ impl<T: ?Sized> Vechonk<T> {
         self.cap = size.get();
     }
 
-    /// Get a raw ptr to an element. Be careful about casting this into a `mut &T`
-    /// # SAFETY
-    /// The index must be in bounds
-    unsafe fn get_unchecked_ptr(&self, index: usize) -> *mut T {
+    /// Get the data for the index
+    /// # Safety
+    /// `index` must not be out of bounds
+    unsafe fn get_data(&self, index: usize) -> PtrData<T> {
         let data_offset = self.offset_for_data(index);
 
-        // SAFETY: We can assume that the index is valid.
+        // SAFETY: The offset will always be less than `self.cap`, because we can't have more than `self.len` `PtrData`
         let data_ptr = unsafe { self.ptr.as_ptr().add(data_offset) };
         let data_ptr = data_ptr as *mut PtrData<T>;
 
         // SAFETY: The pointer is aligned because `self.ptr` is aligned and `data_offset` is a multiple of the alignment
         //         The value behind it is always a `PtrData<T>`
-        let data = unsafe { *data_ptr };
+        unsafe { *data_ptr }
+    }
+
+    /// Get a raw ptr to an element. Be careful about casting this into a `mut &T`
+    /// # SAFETY
+    /// The index must be in bounds
+    unsafe fn get_unchecked_ptr(&self, index: usize) -> *mut T {
+        // SAFETY: We can assume that `index` is valid
+        let data = unsafe { self.get_data(index) };
 
         let elem_ptr = unsafe { self.ptr.as_ptr().add(data.offset) };
 

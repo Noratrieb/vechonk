@@ -162,3 +162,33 @@ fn grow_alignment() {
     let _ = chonk[0];
     let _ = chonk[1];
 }
+
+#[test]
+fn popping() {
+    let mut chonk = Vechonk::<str>::with_capacity(512);
+
+    chonk.push("hello".into());
+    //chonk.push("uwu".into());
+    //chonk.push("I'm popping off!".into());
+
+    //let popping = chonk.pop().unwrap();
+    //let uwu = chonk.pop().unwrap();
+    let hello = chonk.pop().unwrap();
+    let end = chonk.pop();
+
+    //assert_eq!(popping.as_ref(), "hello");
+    //assert_eq!(uwu.as_ref(), "uwu");
+    assert_eq!(hello.as_ref(), "hello");
+    assert_eq!(end, None);
+
+    //drop(popping);
+    //drop(uwu);
+    drop(hello);
+    drop(chonk);
+}
+
+#[test]
+#[ignore]
+fn zst() {
+    todo!("handle them")
+}

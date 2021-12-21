@@ -117,26 +117,33 @@ impl<T: ?Sized> Vechonk<T> {
     pub fn push(&mut self, element: Box<T>) {
         let elem_size = mem::size_of_val(element.as_ref());
 
+        let elem_align = mem::align_of_val(&element);
         let elem_ptr = Box::into_raw(element);
         let meta = ptr::metadata(elem_ptr);
 
         let data_size = mem::size_of::<PtrData<T>>();
+        let elem_offset = self.elem_size;
+
+        // SAFETY: `self.elem_size` can't be longer than the allocation, because `PtrData<T>` needs space as well
+        let required_align_offset =
+            unsafe { self.ptr.as_ptr().add(elem_offset).align_offset(elem_align) };
 
         // just panic here instead of a proper realloc
-        if self.needs_grow(elem_size + data_size) {
+        if self.needs_grow(elem_size + data_size + required_align_offset) {
             self.regrow(self.cap + elem_size + data_size);
         }
 
-        let elem_offset = self.elem_size;
-
-        let data = PtrData {
-            offset: elem_offset,
-            meta,
-        };
-
         // Copy the element to the new location
+        // Calculate the dest pointer again because we might have realloced
         // SAFETY: `self.elem_size` can't be longer than the allocation, because `PtrData<T>` needs space as well
         let dest_ptr = unsafe { self.ptr.as_ptr().add(elem_offset) };
+        let dest_align_offset = dest_ptr.align_offset(elem_align);
+        let dest_ptr = unsafe { dest_ptr.add(dest_align_offset) };
+
+        let data = PtrData {
+            offset: elem_offset + dest_align_offset,
+            meta,
+        };
 
         // SAFETY: `elem_ptr` comes from `Box`, and is therefore valid to read from for the size
         //         We have made sure above that we have more than `elem_size` bytes free

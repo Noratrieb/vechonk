@@ -125,7 +125,6 @@ fn grow_from_alloc() {
 }
 
 #[test]
-#[ignore] // alignment...
 fn push_alignment() {
     use core::any::Any;
 

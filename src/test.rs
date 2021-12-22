@@ -6,6 +6,12 @@ use alloc::boxed::Box;
 #[repr(align(2048))]
 struct BigAlign(u8);
 
+trait TakeMut {
+    fn take_mut(&mut self) {}
+}
+
+impl<T: ?Sized> TakeMut for T {}
+
 #[test]
 fn new() {
     let chonk = Vechonk::<()>::new();
@@ -236,7 +242,7 @@ fn eq_ne() {
 }
 
 #[test]
-fn get_mut_deref() {
+fn get_mut() {
     let mut chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
 
     let hello = chonk1.get_mut(0).unwrap();
@@ -246,16 +252,15 @@ fn get_mut_deref() {
 
 #[test]
 fn get_mut_mutating() {
-    let mut chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+    let mut chonk1: Vechonk<dyn TakeMut> = Vechonk::new();
+    chonk1.push(Box::new("hello"));
+    chonk1.push(Box::new("uwu"));
 
-    let mut hello = chonk1.get_mut(0).unwrap();
+    let hello = chonk1.get_mut(0).unwrap();
 
-    hello.try_write("owo".into()).unwrap();
-    hello
-        .try_write("hi, I'm wayyyyy too long".into())
-        .unwrap_err();
+    hello.take_mut();
 
-    assert_eq!(&*hello, "owo");
+    assert_eq!(chonk1.len(), 2);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use crate::{MutGuard, RawVechonk, Vechonk};
+use crate::{RawVechonk, Vechonk};
 use alloc::boxed::Box;
 use core::marker::PhantomData;
 use core::mem;
@@ -68,19 +68,20 @@ impl<'a, T: ?Sized> IterMut<'a, T> {
 }
 
 impl<'a, T: ?Sized> Iterator for IterMut<'a, T> {
-    type Item = MutGuard<T>;
+    type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current_index == self.raw.len {
             return None;
         }
 
-        let old_index = self.current_index;
+        // SAFETY: We just did a bounds check above
+        let ptr = unsafe { self.raw.get_unchecked_ptr(self.current_index) };
 
         self.current_index += 1;
 
-        // SAFETY: We did a bounds check above, and taken `&mut Vechonk`
-        unsafe { Some(MutGuard::new(self.raw.copy(), old_index)) }
+        // SAFETY: We rely on `get_unchecked_ptr` returning a valid pointer, which is does, see its SAFETY comments
+        unsafe { Some(&mut *ptr) }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

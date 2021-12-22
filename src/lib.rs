@@ -46,7 +46,7 @@ use alloc::boxed::Box;
 use core::cmp;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
-use core::ops::{Deref, Index};
+use core::ops::{Index, IndexMut};
 
 pub use iter::{IntoIter, Iter, IterMut};
 
@@ -137,7 +137,7 @@ impl<T: ?Sized> Vechonk<T> {
     }
 
     /// Get a mutable guard to an element at the index. Returns `None` if the index is out of bounds
-    pub fn get_mut(&mut self, index: usize) -> Option<MutGuard<T>> {
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         if index < self.len() {
             // SAFETY: The index has been checked above
             unsafe { Some(self.get_unchecked_mut(index)) }
@@ -148,9 +148,11 @@ impl<T: ?Sized> Vechonk<T> {
 
     /// # Safety
     /// The index must be in bounds
-    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> MutGuard<T> {
-        // SAFETY: We can assume that `index` is not out of bounds
-        unsafe { MutGuard::new(self.raw.copy(), index) }
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
+        //         The pointer is calculated from the offset, which is also valid
+        //         The pointer is aligned, because it has been aligned manually in `Self::push`
+        unsafe { &mut *self.raw.get_unchecked_ptr(index) }
     }
 
     /// # Safety
@@ -174,41 +176,6 @@ impl<T: ?Sized> Vechonk<T> {
     }
 }
 
-/// A guard that acts similarly to a `&mut T`, but does not allow any arbitrary value to be written,
-/// instead checking whether the element has the correct size/alignment to fit the space of the old element.
-pub struct MutGuard<T: ?Sized> {
-    raw: RawVechonk<T>,
-    /// Must always be in bounds
-    index: usize,
-}
-
-impl<T: ?Sized> MutGuard<T> {
-    /// # Safety
-    /// The index must not be out of bounds, and `raw` must be mutable
-    pub(crate) unsafe fn new(raw: RawVechonk<T>, index: usize) -> Self {
-        Self { raw, index }
-    }
-
-    /// Write a new element to the location.
-    /// * If the element fits in the space, the old element is returned
-    /// * If the element does not fit in the space, the new element is returned again
-    pub fn try_write(&mut self, element: Box<T>) -> Result<Box<T>, Box<T>> {
-        self.raw.try_replace_elem(element, self.index)
-    }
-}
-
-impl<T: ?Sized> Deref for MutGuard<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
-        //         The pointer is calculated from the offset, which is also valid
-        //         The pointer is aligned, because it has been aligned manually in `Self::push`
-        //         We can assume that the index is in bounds
-        unsafe { &*self.raw.get_unchecked_ptr(self.index) }
-    }
-}
-
 impl<T: ?Sized> Index<usize> for Vechonk<T> {
     type Output = T;
 
@@ -219,6 +186,17 @@ impl<T: ?Sized> Index<usize> for Vechonk<T> {
 
         // SAFETY: The index is not out of bounds
         unsafe { self.get_unchecked(index) }
+    }
+}
+
+impl<T: ?Sized> IndexMut<usize> for Vechonk<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        if index >= self.len() {
+            panic!("Out of bounds, index {} for len {}", index, self.len());
+        }
+
+        // SAFETY: The index is not out of bounds
+        unsafe { self.get_unchecked_mut(index) }
     }
 }
 

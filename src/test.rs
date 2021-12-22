@@ -262,7 +262,7 @@ fn get_mut_mutating() {
 fn insert() {
     let mut chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
 
-    chonk.try_insert(0, "owo".into()).unwrap();
+    chonk.try_replace(0, "owo".into()).unwrap();
 
     assert_eq!(&chonk[0], "owo");
 }

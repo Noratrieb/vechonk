@@ -95,11 +95,26 @@ impl<T: ?Sized> Vechonk<T> {
         self.raw.pop()
     }
 
-    /// Insert an element at an index.
-    /// * If the insertion was successful, the old element is returned.
+    pub fn insert(&mut self, _index: usize, _element: Box<T>) {
+        todo!()
+    }
+
+    /// Replace an element at an index.
+    /// This could be O(n) worst case, if the new element is too big, and every other element needs to be realigned.
+    /// Even worse, after all the copying, it might realloc anyways because it couldn't fit in the space.
+    ///
+    /// Returns the old element at that
+    pub fn replace(&mut self, _index: usize, _element: Box<T>) -> Box<T> {
+        todo!()
+    }
+
+    /// Replace an element at an index.
+    /// * If the replacement was successful without moving the other elements, the old element is returned.
     /// * If the new element doesn't fit the gap or can't be aligned, it is returned.
-    pub fn try_insert(&mut self, index: usize, element: Box<T>) -> Result<Box<T>, Box<T>> {
-        self.raw.try_insert_elem(element, index)
+    ///
+    /// This is guaranteed to be O(1)
+    pub fn try_replace(&mut self, index: usize, element: Box<T>) -> Result<Box<T>, Box<T>> {
+        self.raw.try_replace_elem(element, index)
     }
 
     /// An iterator over the elements yielding shared references
@@ -179,7 +194,7 @@ impl<T: ?Sized> MutGuard<T> {
     /// * If the element fits in the space, the old element is returned
     /// * If the element does not fit in the space, the new element is returned again
     pub fn try_write(&mut self, element: Box<T>) -> Result<Box<T>, Box<T>> {
-        self.raw.try_insert_elem(element, self.index)
+        self.raw.try_replace_elem(element, self.index)
     }
 }
 

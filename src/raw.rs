@@ -127,7 +127,7 @@ impl<T: ?Sized> RawVechonk<T> {
     /// Insert an element at an index.
     /// * If the insertion was successful, the old element is returned.
     /// * If the new element doesn't fit the gap or can't be aligned, it is returned.
-    pub fn try_insert_elem(&mut self, element: Box<T>, index: usize) -> Result<Box<T>, Box<T>> {
+    pub fn try_replace_elem(&mut self, element: Box<T>, index: usize) -> Result<Box<T>, Box<T>> {
         if index >= self.len {
             // out of bounds
             return Err(element);
@@ -328,6 +328,8 @@ impl<T: ?Sized> RawVechonk<T> {
     /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
     /// `self.ptr` before calling this function.
     unsafe fn realloc(&mut self, size: NonZeroUsize) {
+        // TODO this is *not* sound, since the alignment of some big elements might be wrong now
+
         let layout = Layout::from_size_align(size.get(), Self::data_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size

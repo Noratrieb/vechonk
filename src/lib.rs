@@ -98,8 +98,8 @@ impl<T: ?Sized> Vechonk<T> {
     /// Insert an element at an index.
     /// * If the insertion was successful, the old element is returned.
     /// * If the new element doesn't fit the gap or can't be aligned, it is returned.
-    pub fn insert(&mut self, index: usize, element: Box<T>) -> Result<Box<T>, Box<T>> {
-        self.raw.insert_elem(element, index)
+    pub fn try_insert(&mut self, index: usize, element: Box<T>) -> Result<Box<T>, Box<T>> {
+        self.raw.try_insert_elem(element, index)
     }
 
     /// An iterator over the elements yielding shared references
@@ -178,8 +178,8 @@ impl<T: ?Sized> MutGuard<T> {
     /// Write a new element to the location.
     /// * If the element fits in the space, the old element is returned
     /// * If the element does not fit in the space, the new element is returned again
-    pub fn write(&mut self, element: Box<T>) -> Result<Box<T>, Box<T>> {
-        self.raw.insert_elem(element, self.index)
+    pub fn try_write(&mut self, element: Box<T>) -> Result<Box<T>, Box<T>> {
+        self.raw.try_insert_elem(element, self.index)
     }
 }
 

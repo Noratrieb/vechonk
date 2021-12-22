@@ -250,8 +250,10 @@ fn get_mut_mutating() {
 
     let mut hello = chonk1.get_mut(0).unwrap();
 
-    hello.write("owo".into()).unwrap();
-    hello.write("hi, I'm wayyyyy too long".into()).unwrap_err();
+    hello.try_write("owo".into()).unwrap();
+    hello
+        .try_write("hi, I'm wayyyyy too long".into())
+        .unwrap_err();
 
     assert_eq!(&*hello, "owo");
 }
@@ -260,7 +262,7 @@ fn get_mut_mutating() {
 fn insert() {
     let mut chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
 
-    chonk.insert(0, "owo".into()).unwrap();
+    chonk.try_insert(0, "owo".into()).unwrap();
 
     assert_eq!(&chonk[0], "owo");
 }

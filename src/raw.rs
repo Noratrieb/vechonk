@@ -77,7 +77,6 @@ impl<T: ?Sized> RawVechonk<T> {
 
         let elem_align = mem::align_of_val(element.as_ref());
         let elem_ptr = Box::into_raw(element);
-        let meta = ptr::metadata(elem_ptr);
 
         let data_size = mem::size_of::<PtrData<T>>();
         let elem_offset = self.elem_size;
@@ -105,11 +104,6 @@ impl<T: ?Sized> RawVechonk<T> {
         let dest_align_offset = dest_ptr.align_offset(elem_align);
         let dest_ptr = unsafe { dest_ptr.add(dest_align_offset) };
 
-        let data = PtrData {
-            offset: elem_offset + dest_align_offset,
-            meta,
-        };
-
         // SAFETY: `elem_ptr` comes from `Box`, and is therefore valid to read from for the size
         //         We have made sure above that we have more than `elem_size` bytes free
         //         The two allocations cannot overlap, since the `Box` owned its contents, and so do we
@@ -118,17 +112,8 @@ impl<T: ?Sized> RawVechonk<T> {
             ptr::copy_nonoverlapping::<u8>(elem_ptr as _, dest_ptr, elem_size);
         }
 
-        let data_offset = self.offset_for_data(self.len);
-
-        // SAFETY: The offset will always be less than `self.cap`, because we can't have more than `self.len` `PtrData`
-        let data_ptr = unsafe { self.ptr.as_ptr().add(data_offset) };
-        let data_ptr = data_ptr as *mut PtrData<T>;
-
-        // SAFETY: The pointer is aligned, because `self.ptr` and `self.cap` are
-        //         It's not out of bounds for our allocation, see above
-        unsafe {
-            *data_ptr = data;
-        }
+        // SAFETY: We've made sure that there's enough space for another data
+        unsafe { self.write_meta_data(elem_ptr, elem_offset + dest_align_offset, self.len) };
 
         self.elem_size += elem_size;
         self.len += 1;
@@ -142,7 +127,7 @@ impl<T: ?Sized> RawVechonk<T> {
     /// Insert an element at an index.
     /// * If the insertion was successful, the old element is returned.
     /// * If the new element doesn't fit the gap or can't be aligned, it is returned.
-    pub fn insert_elem(&mut self, element: Box<T>, index: usize) -> Result<Box<T>, Box<T>> {
+    pub fn try_insert_elem(&mut self, element: Box<T>, index: usize) -> Result<Box<T>, Box<T>> {
         if index >= self.len {
             // out of bounds
             return Err(element);
@@ -161,7 +146,7 @@ impl<T: ?Sized> RawVechonk<T> {
         // this is where the free space, including padding, where we could place the element starts
         // since there might be padding for the previous element, this is sometimes before `elem_offset`
         let free_space_start_offset = if index == 0 {
-            self.cap
+            0
         } else {
             // SAFETY: `index` is not 0
             unsafe {
@@ -215,17 +200,7 @@ impl<T: ?Sized> RawVechonk<T> {
         };
 
         // SAFETY: `index` is not out of bounds, and we are overwriting the element afterwards
-        let data_ptr = unsafe { self.get_data_ptr(index) };
-
-        let meta = ptr::metadata(elem_ptr);
-
-        let new_data: PtrData<T> = PtrData {
-            offset: new_elem_starting_offset,
-            meta,
-        };
-
-        // SAFETY: We can assume that `get_data_ptr` returns valid pointers to `PtrData<T>`
-        unsafe { *data_ptr = new_data };
+        unsafe { self.write_meta_data(elem_ptr, new_elem_starting_offset, index) };
 
         // SAFETY: `elem_ptr` comes from the box
         unsafe { dealloc_box(elem_ptr) };
@@ -374,6 +349,21 @@ impl<T: ?Sized> RawVechonk<T> {
         self.cap = size.get();
     }
 
+    /// Writes the metadata of the `ptr` and the `offset` to a `PtrData<T>` at `index`
+    /// # Safety
+    /// `index` must be in bounds, or only so much out of bounds as to not overwrite element data
+    unsafe fn write_meta_data(&mut self, ptr: *mut T, offset: usize, index: usize) {
+        // SAFETY: `index` is not out of bounds, and we are overwriting the element afterwards
+        let data_ptr = unsafe { self.get_data_ptr(index) };
+
+        let meta = ptr::metadata::<T>(ptr);
+
+        let new_data: PtrData<T> = PtrData { offset, meta };
+
+        // SAFETY: We can assume that `get_data_ptr` returns valid pointers to `PtrData<T>`
+        unsafe { *data_ptr = new_data };
+    }
+
     /// Get the data for the index
     /// # Safety
     /// `index` must not be out of bounds
@@ -405,7 +395,7 @@ impl<T: ?Sized> RawVechonk<T> {
     }
 
     /// # Safety
-    /// `index` must not be out of bounds
+    /// `index` must be in bounds, or only so much out of bounds to not overwrite element data
     unsafe fn get_data_ptr(&self, index: usize) -> *mut PtrData<T> {
         let data_offset = self.offset_for_data(index);
 

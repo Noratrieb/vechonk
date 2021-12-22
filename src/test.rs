@@ -273,7 +273,44 @@ fn insert() {
 }
 
 #[test]
-#[ignore]
-fn zst() {
-    todo!("handle them")
+fn zst_with_capacity() {
+    let _ = Vechonk::<()>::with_capacity(96);
+}
+
+#[test]
+fn zst_push() {
+    let mut chonk = Vechonk::<()>::with_capacity(96);
+    chonk.push(().into());
+
+    assert_eq!(chonk.len(), 1);
+}
+
+#[test]
+fn zst_realloc() {
+    let mut chonk = Vechonk::new();
+    chonk.push(().into());
+    assert_eq!(chonk.len(), 1);
+}
+
+#[test]
+fn zst_replace() {
+    let mut chonk = Vechonk::new();
+    chonk.push(().into());
+    assert_eq!(chonk.len(), 1);
+    let mut old = chonk.try_replace(0, ().into()).unwrap();
+    old.take_mut();
+    assert_eq!(chonk.len(), 1);
+}
+
+#[test]
+fn empty_slice_replace() {
+    let mut chonk = Vechonk::<[u8]>::new();
+    chonk.push([].into());
+    assert_eq!(chonk.len(), 1);
+    let mut old = chonk.try_replace(0, [].into()).unwrap();
+    assert_eq!(chonk.len(), 1);
+
+    drop(chonk);
+
+    old.take_mut();
 }

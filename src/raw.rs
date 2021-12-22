@@ -94,7 +94,8 @@ impl<T: ?Sized> RawVechonk<T> {
 
         // just panic here instead of a proper realloc
         if self.needs_grow(elem_size + data_size + required_align_offset) {
-            self.regrow(self.cap + elem_size + data_size);
+            // If we need to grow, we can be sure that at least some part of it is not zero
+            self.regrow(unsafe { NonZeroUsize::new_unchecked(self.cap + elem_size + data_size) });
         }
 
         // Copy the element to the new location
@@ -240,9 +241,19 @@ impl<T: ?Sized> RawVechonk<T> {
         // when the element was added
         let elem_fat_ref = unsafe { &*elem_fat_ptr };
 
+        if mem::size_of_val::<T>(elem_fat_ref) == 0 {
+            // SAFETY: The value has no size, so it's ok for it to be dangling around
+            return unsafe {
+                Box::from_raw(ptr::from_raw_parts_mut::<T>(
+                    mem::align_of_val(elem_fat_ref) as *mut (),
+                    data.meta,
+                ))
+            };
+        }
+
         let element_box_layout = Layout::for_value(elem_fat_ref);
 
-        // SAFETY: TODO does not work with ZST
+        // SAFETY: We have an early return if the size is zero
         let box_ptr = unsafe { alloc::alloc::alloc(element_box_layout) };
 
         if box_ptr.is_null() {
@@ -278,9 +289,9 @@ impl<T: ?Sized> RawVechonk<T> {
         ptr::from_raw_parts_mut(elem_ptr as *mut (), data.meta)
     }
 
-    fn regrow(&mut self, min_size: usize) {
+    fn regrow(&mut self, min_size: NonZeroUsize) {
         // new_cap must be properly "aligned" for `PtrData<T>`
-        let new_cap = force_align(min_size * 2, Self::data_align());
+        let new_cap = force_align(min_size.get() * 2, Self::data_align());
 
         let old_ptr = self.ptr.as_ptr();
         let old_cap = self.cap;
@@ -288,7 +299,7 @@ impl<T: ?Sized> RawVechonk<T> {
         let last_data_index = self.len.saturating_sub(1);
         let old_data_offset = self.offset_for_data(last_data_index);
 
-        // SAFETY: new_cap can't be 0 because of the +1
+        // SAFETY: `min_size` was already non-zero
         //         We will copy the elements over
         unsafe {
             self.realloc(NonZeroUsize::new_unchecked(new_cap));
@@ -444,10 +455,18 @@ impl<T: ?Sized> RawVechonk<T> {
 unsafe fn dealloc_box<T: ?Sized>(ptr: *mut T) {
     // SAFETY: This was allocated by `Box`, so we know that it is valid.
     //         The ownership of the value was transferred to `Vechonk` by copying it out
+
+    if mem::size_of_val(unsafe { &*ptr }) == 0 {
+        // no-op
+        return;
+    }
+
     unsafe {
         alloc::alloc::dealloc(
             ptr as _,
-            Layout::from_size_align(mem::size_of_val(&*ptr), mem::align_of_val(&*ptr)).unwrap(),
+            // todo probably use unchecked
+            Layout::from_size_align(mem::size_of_val::<T>(&*ptr), mem::align_of_val::<T>(&*ptr))
+                .unwrap(),
         )
     }
 }

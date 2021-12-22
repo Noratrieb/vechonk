@@ -245,7 +245,6 @@ fn get_mut_deref() {
 }
 
 #[test]
-#[ignore]
 fn get_mut_mutating() {
     let mut chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
 
@@ -255,6 +254,15 @@ fn get_mut_mutating() {
     hello.write("hi, I'm wayyyyy too long".into()).unwrap_err();
 
     assert_eq!(&*hello, "owo");
+}
+
+#[test]
+fn insert() {
+    let mut chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    chonk.insert(0, "owo".into()).unwrap();
+
+    assert_eq!(&chonk[0], "owo");
 }
 
 #[test]

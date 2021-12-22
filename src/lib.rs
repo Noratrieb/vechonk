@@ -95,6 +95,13 @@ impl<T: ?Sized> Vechonk<T> {
         self.raw.pop()
     }
 
+    /// Insert an element at an index.
+    /// * If the insertion was successful, the old element is returned.
+    /// * If the new element doesn't fit the gap or can't be aligned, it is returned.
+    pub fn insert(&mut self, index: usize, element: Box<T>) -> Result<Box<T>, Box<T>> {
+        self.raw.insert_elem(element, index)
+    }
+
     /// An iterator over the elements yielding shared references
     pub fn iter(&self) -> Iter<T> {
         Iter::new(self)
@@ -172,8 +179,7 @@ impl<T: ?Sized> MutGuard<T> {
     /// * If the element fits in the space, the old element is returned
     /// * If the element does not fit in the space, the new element is returned again
     pub fn write(&mut self, element: Box<T>) -> Result<Box<T>, Box<T>> {
-        // SAFETY: We can assume that `index` is in bounds
-        unsafe { self.raw.insert_elem_unchecked(element, self.index) }
+        self.raw.insert_elem(element, self.index)
     }
 }
 

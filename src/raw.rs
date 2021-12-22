@@ -133,28 +133,32 @@ impl<T: ?Sized> RawVechonk<T> {
         self.elem_size += elem_size;
         self.len += 1;
 
-        // SAFETY: This was allocated by `Box`, so we know that it is valid.
-        //         The ownership of the value was transferred to `Vechonk` by copying it out
+        // SAFETY: `elem_ptr` comes from a `Box<T>`
         unsafe {
-            alloc::alloc::dealloc(
-                elem_ptr as _,
-                Layout::from_size_align(elem_size, mem::align_of_val(&*elem_ptr)).unwrap(),
-            )
+            dealloc_box(elem_ptr);
         }
     }
 
-    /// Insert an element at an index
-    /// # Safety
-    /// * The index must be in bounds
-    ///
-    /// If the insertion was successful, the old element is returned.
-    /// If the new element doesn't fit the gap or can't be aligned, it is returned.
-    pub unsafe fn insert_elem_unchecked(
-        &mut self,
-        element: Box<T>,
-        index: usize,
-    ) -> Result<Box<T>, Box<T>> {
-        // this is where the free space, where we could place the element starts
+    /// Insert an element at an index.
+    /// * If the insertion was successful, the old element is returned.
+    /// * If the new element doesn't fit the gap or can't be aligned, it is returned.
+    pub fn insert_elem(&mut self, element: Box<T>, index: usize) -> Result<Box<T>, Box<T>> {
+        if index >= self.len {
+            // out of bounds
+            return Err(element);
+        }
+
+        /*
+        Imagine a Vechonk<dyn Any> (1 space = one byte) that contains u8, u8, u32, u32
+        Our `index` here is 2, we want to replace the 9847u32 with a 0u8
+        We actually want to write that u8 to where the padding was before, for optimization reasons
+        ╭───┬───────┬────╮
+        │1|2│  ¦9847│3875│
+        ------------------
+        │1|2│0      │3875│
+         */
+
+        // this is where the free space, including padding, where we could place the element starts
         // since there might be padding for the previous element, this is sometimes before `elem_offset`
         let free_space_start_offset = if index == 0 {
             self.cap
@@ -195,7 +199,38 @@ impl<T: ?Sized> RawVechonk<T> {
             return Err(element);
         }
 
-        todo!()
+        // SAFETY: `index` is not out of bounds, and we are overwriting the element afterwards
+        let old_elem = unsafe { self.box_elem_unchecked(index) };
+
+        let elem_ptr = Box::into_raw(element);
+
+        // SAFETY: `new_elem_starting_offset` has been calculated to fall within the allocation
+        let new_elem_start_ptr = unsafe { self.ptr.as_ptr().add(new_elem_starting_offset) };
+
+        // SAFETY: The allocation can't overlap because both own the memory, `elem_ptr` comes from box
+        //         we have checked that there's enough space behind `new_elem_start_ptr`
+        //         `elem_size` is the size of the element, obtained by `sizeof_elem`
+        unsafe {
+            ptr::copy_nonoverlapping::<u8>(elem_ptr as *mut u8, new_elem_start_ptr, elem_size)
+        };
+
+        // SAFETY: `index` is not out of bounds, and we are overwriting the element afterwards
+        let data_ptr = unsafe { self.get_data_ptr(index) };
+
+        let meta = ptr::metadata(elem_ptr);
+
+        let new_data: PtrData<T> = PtrData {
+            offset: new_elem_starting_offset,
+            meta,
+        };
+
+        // SAFETY: We can assume that `get_data_ptr` returns valid pointers to `PtrData<T>`
+        unsafe { *data_ptr = new_data };
+
+        // SAFETY: `elem_ptr` comes from the box
+        unsafe { dealloc_box(elem_ptr) };
+
+        Ok(old_elem)
     }
 
     pub fn pop(&mut self) -> Option<Box<T>> {
@@ -245,7 +280,7 @@ impl<T: ?Sized> RawVechonk<T> {
         // SAFETY: The new allocation doesn't overlap, `box_ptr` was just allocated and is non_null
         //         For `elem_ptr`, see safety comments above, the size was obtained above as well
         unsafe {
-            ptr::copy_nonoverlapping(elem_ptr, box_ptr, elem_size);
+            ptr::copy_nonoverlapping::<u8>(elem_ptr, box_ptr, elem_size);
         }
 
         // SAFETY: See above for both variables. `data.meta` is the valid metadata for the element
@@ -287,7 +322,7 @@ impl<T: ?Sized> RawVechonk<T> {
         // copy the elements first
         // SAFETY: both pointers point to the start of allocations smaller than `self.elem_size` and own them
         unsafe {
-            ptr::copy_nonoverlapping(old_ptr, self.ptr.as_ptr(), self.elem_size);
+            ptr::copy_nonoverlapping::<u8>(old_ptr, self.ptr.as_ptr(), self.elem_size);
         }
 
         // then copy the data
@@ -295,7 +330,7 @@ impl<T: ?Sized> RawVechonk<T> {
         unsafe {
             let new_data_ptr = self.ptr.as_ptr().add(self.offset_for_data(last_data_index));
 
-            ptr::copy_nonoverlapping(
+            ptr::copy_nonoverlapping::<u8>(
                 old_ptr.add(old_data_offset),
                 new_data_ptr,
                 self.data_section_size(),
@@ -408,5 +443,19 @@ impl<T: ?Sized> RawVechonk<T> {
 
     const fn data_align() -> usize {
         mem::align_of::<PtrData<T>>()
+    }
+}
+
+/// Deallocates memory from a `Box<T>`
+/// # Safety
+/// `ptr` must point to an allocation from a `Box<T>`, and must be safe to free
+unsafe fn dealloc_box<T: ?Sized>(ptr: *mut T) {
+    // SAFETY: This was allocated by `Box`, so we know that it is valid.
+    //         The ownership of the value was transferred to `Vechonk` by copying it out
+    unsafe {
+        alloc::alloc::dealloc(
+            ptr as _,
+            Layout::from_size_align(mem::size_of_val(&*ptr), mem::align_of_val(&*ptr)).unwrap(),
+        )
     }
 }

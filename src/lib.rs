@@ -48,8 +48,7 @@ use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 use core::ops::{Deref, Index};
 
-use crate::iter::IterMut;
-pub use iter::{IntoIter, Iter};
+pub use iter::{IntoIter, Iter, IterMut};
 
 /// chonky af
 ///

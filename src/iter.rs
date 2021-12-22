@@ -1,4 +1,4 @@
-use crate::{RawVechonk, Vechonk};
+use crate::{MutGuard, RawVechonk, Vechonk};
 use alloc::boxed::Box;
 use core::marker::PhantomData;
 use core::mem;
@@ -45,6 +45,52 @@ impl<'a, T: ?Sized> Iterator for Iter<'a, T> {
 }
 
 impl<'a, T: ?Sized> ExactSizeIterator for Iter<'a, T> {
+    fn len(&self) -> usize {
+        self.raw.len - self.current_index
+    }
+}
+
+/// An iterator over the elements of a [`Vechonk`]
+pub struct IterMut<'a, T: ?Sized> {
+    raw: RawVechonk<T>,
+    current_index: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T: ?Sized> IterMut<'a, T> {
+    pub(super) fn new(chonk: &'a mut Vechonk<T>) -> IterMut<'a, T> {
+        Self {
+            raw: chonk.raw.copy(),
+            current_index: 0,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'a, T: ?Sized> Iterator for IterMut<'a, T> {
+    type Item = MutGuard<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index == self.raw.len {
+            return None;
+        }
+
+        let old_index = self.current_index;
+
+        self.current_index += 1;
+
+        // SAFETY: We did a bounds check above, and taken `&mut Vechonk`
+        unsafe { Some(MutGuard::new(self.raw.copy(), old_index)) }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let count = self.raw.len - self.current_index;
+
+        (count, Some(count))
+    }
+}
+
+impl<'a, T: ?Sized> ExactSizeIterator for IterMut<'a, T> {
     fn len(&self) -> usize {
         self.raw.len - self.current_index
     }

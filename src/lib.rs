@@ -46,10 +46,10 @@ use alloc::boxed::Box;
 use core::cmp;
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
-use core::ops::Index;
+use core::ops::{Deref, Index};
 
-use crate::iter::IntoIter;
-pub use iter::Iter;
+use crate::iter::IterMut;
+pub use iter::{IntoIter, Iter};
 
 /// chonky af
 ///
@@ -100,6 +100,11 @@ impl<T: ?Sized> Vechonk<T> {
         Iter::new(self)
     }
 
+    /// An iterator over the elements yielding [`MutGuard`]s
+    pub fn iter_mut(&mut self) -> IterMut<T> {
+        IterMut::new(self)
+    }
+
     /// Get a reference to an element at the index. Returns `None` if the index is out of bounds
     pub fn get(&self, index: usize) -> Option<&T> {
         if index < self.len() {
@@ -108,6 +113,23 @@ impl<T: ?Sized> Vechonk<T> {
         } else {
             None
         }
+    }
+
+    /// Get a mutable guard to an element at the index. Returns `None` if the index is out of bounds
+    pub fn get_mut(&mut self, index: usize) -> Option<MutGuard<T>> {
+        if index < self.len() {
+            // SAFETY: The index has been checked above
+            unsafe { Some(self.get_unchecked_mut(index)) }
+        } else {
+            None
+        }
+    }
+
+    /// # Safety
+    /// The index must be in bounds
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> MutGuard<T> {
+        // SAFETY: We can assume that `index` is not out of bounds
+        unsafe { MutGuard::new(self.raw.copy(), index) }
     }
 
     /// # Safety
@@ -128,6 +150,42 @@ impl<T: ?Sized> Vechonk<T> {
         let array = unsafe { *(self.raw.ptr.as_ptr() as *mut [u8; 96]) };
 
         panic!("{:?}", array)
+    }
+}
+
+/// A guard that acts similarly to a `&mut T`, but does not allow any arbitrary value to be written,
+/// instead checking whether the element has the correct size/alignment to fit the space of the old element.
+pub struct MutGuard<T: ?Sized> {
+    raw: RawVechonk<T>,
+    /// Must always be in bounds
+    index: usize,
+}
+
+impl<T: ?Sized> MutGuard<T> {
+    /// # Safety
+    /// The index must not be out of bounds, and `raw` must be mutable
+    pub(crate) unsafe fn new(raw: RawVechonk<T>, index: usize) -> Self {
+        Self { raw, index }
+    }
+
+    /// Write a new element to the location.
+    /// * If the element fits in the space, the old element is returned
+    /// * If the element does not fit in the space, the new element is returned again
+    pub fn write(&mut self, element: Box<T>) -> Result<Box<T>, Box<T>> {
+        // SAFETY: We can assume that `index` is in bounds
+        unsafe { self.raw.insert_elem_unchecked(element, self.index) }
+    }
+}
+
+impl<T: ?Sized> Deref for MutGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: The metadata is only assigned directly from the pointer metadata of the original object and therefore valid
+        //         The pointer is calculated from the offset, which is also valid
+        //         The pointer is aligned, because it has been aligned manually in `Self::push`
+        //         We can assume that the index is in bounds
+        unsafe { &*self.raw.get_unchecked_ptr(self.index) }
     }
 }
 

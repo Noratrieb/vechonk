@@ -236,6 +236,28 @@ fn eq_ne() {
 }
 
 #[test]
+fn get_mut_deref() {
+    let mut chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    let hello = chonk1.get_mut(0).unwrap();
+
+    assert_eq!(&*hello, "hello");
+}
+
+#[test]
+#[ignore]
+fn get_mut_mutating() {
+    let mut chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    let mut hello = chonk1.get_mut(0).unwrap();
+
+    hello.write("owo".into()).unwrap();
+    hello.write("hi, I'm wayyyyy too long".into()).unwrap_err();
+
+    assert_eq!(&*hello, "owo");
+}
+
+#[test]
 #[ignore]
 fn zst() {
     todo!("handle them")

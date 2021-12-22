@@ -143,6 +143,61 @@ impl<T: ?Sized> RawVechonk<T> {
         }
     }
 
+    /// Insert an element at an index
+    /// # Safety
+    /// * The index must be in bounds
+    ///
+    /// If the insertion was successful, the old element is returned.
+    /// If the new element doesn't fit the gap or can't be aligned, it is returned.
+    pub unsafe fn insert_elem_unchecked(
+        &mut self,
+        element: Box<T>,
+        index: usize,
+    ) -> Result<Box<T>, Box<T>> {
+        // this is where the free space, where we could place the element starts
+        // since there might be padding for the previous element, this is sometimes before `elem_offset`
+        let free_space_start_offset = if index == 0 {
+            self.cap
+        } else {
+            // SAFETY: `index` is not 0
+            unsafe {
+                let data_element_before = self.get_data(index - 1);
+                data_element_before.offset + self.sizeof_elem(index - 1)
+            }
+        };
+
+        let next_element_start_offset = if index == self.len - 1 {
+            self.cap - self.data_section_size()
+        } else {
+            // SAFETY: We have checked that `index` is not the last element
+            unsafe { self.get_data(index + 1).offset }
+        };
+
+        let elem_size = mem::size_of_val::<T>(element.as_ref());
+        let elem_align = mem::align_of_val::<T>(element.as_ref());
+
+        let required_align_offset = self
+            .ptr
+            .as_ptr()
+            .wrapping_add(free_space_start_offset)
+            .align_offset(elem_align);
+
+        if required_align_offset == usize::MAX {
+            // we could not align the element, so just return it
+            return Err(element);
+        }
+
+        let new_elem_starting_offset = free_space_start_offset + required_align_offset;
+        let actual_free_space = next_element_start_offset.saturating_sub(new_elem_starting_offset);
+
+        if actual_free_space < elem_size {
+            // We don't have enough space for the element.
+            return Err(element);
+        }
+
+        todo!()
+    }
+
     pub fn pop(&mut self) -> Option<Box<T>> {
         if self.len == 0 {
             return None;
@@ -184,7 +239,9 @@ impl<T: ?Sized> RawVechonk<T> {
             alloc::alloc::handle_alloc_error(element_box_layout);
         }
 
-        let elem_size = mem::size_of_val(elem_fat_ref);
+        // SAFETY: We can rely on `index` not being out of bounds
+        let elem_size = unsafe { self.sizeof_elem(index) };
+
         // SAFETY: The new allocation doesn't overlap, `box_ptr` was just allocated and is non_null
         //         For `elem_ptr`, see safety comments above, the size was obtained above as well
         unsafe {
@@ -286,15 +343,40 @@ impl<T: ?Sized> RawVechonk<T> {
     /// # Safety
     /// `index` must not be out of bounds
     unsafe fn get_data(&self, index: usize) -> PtrData<T> {
-        let data_offset = self.offset_for_data(index);
-
-        // SAFETY: The offset will always be less than `self.cap`, because we can't have more than `self.len` `PtrData`
-        let data_ptr = unsafe { self.ptr.as_ptr().add(data_offset) };
-        let data_ptr = data_ptr as *mut PtrData<T>;
+        // SAFETY: We can assume that `index` is not out of bounds
+        let data_ptr = unsafe { self.get_data_ptr(index) };
 
         // SAFETY: The pointer is aligned because `self.ptr` is aligned and `data_offset` is a multiple of the alignment
         //         The value behind it is always a `PtrData<T>`
         unsafe { *data_ptr }
+    }
+
+    /// # Safety
+    /// `index` must not be out of bounds
+    unsafe fn sizeof_elem(&self, index: usize) -> usize {
+        // SAFETY: We can rely on `index` not being out of bounds
+        let data = unsafe { self.get_data(index) };
+
+        // SAFETY: We can assume that the `offset` from `data` is not out of bounds
+        let elem_ptr = unsafe { self.ptr.as_ptr().add(data.offset) };
+
+        // allocate a new `Box` for the return value
+        let elem_fat_ptr = ptr::from_raw_parts_mut::<T>(elem_ptr as *mut (), data.meta);
+        // SAFETY: The metadata has been preserved, and the pointer has been properly aligned and initialized
+        // when the element was added
+        let elem_fat_ref = unsafe { &*elem_fat_ptr };
+
+        mem::size_of_val(elem_fat_ref)
+    }
+
+    /// # Safety
+    /// `index` must not be out of bounds
+    unsafe fn get_data_ptr(&self, index: usize) -> *mut PtrData<T> {
+        let data_offset = self.offset_for_data(index);
+
+        // SAFETY: The offset will always be less than `self.cap`, because we can't have more than `self.len` `PtrData`
+        let data_ptr = unsafe { self.ptr.as_ptr().add(data_offset) };
+        data_ptr as *mut PtrData<T>
     }
 
     /// SAFETY: The allocation must be owned by `ptr` and have the length `cap`

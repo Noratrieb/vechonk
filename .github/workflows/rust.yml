@@ -129,7 +129,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly-2022-09-15
       - name: Run cargo clippy (default features)
         run: cargo clippy --all-targets --verbose -- -D clippy::all
 
@@ -141,7 +141,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly-2022-09-15
         with:
           components: rustfmt
       - name: Check formatting
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           fetch-depth: 1
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@nightly-2022-09-15
       - name: Check docs
         # Note: needs cargo rustdoc, not cargo doc.
         run: cargo rustdoc --all-features -- -D warnings

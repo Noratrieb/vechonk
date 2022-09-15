@@ -104,7 +104,7 @@ pub struct IntoIter<T: ?Sized> {
     _marker: PhantomData<T>,
 }
 
-impl<'a, T: ?Sized> IntoIter<T> {
+impl<T: ?Sized> IntoIter<T> {
     pub(crate) fn from_raw(raw: RawVechonk<T>) -> Self {
         Self {
             raw,

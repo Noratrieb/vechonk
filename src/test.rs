@@ -42,7 +42,6 @@ fn default() {
     assert_eq!(chonk.len(), 0);
 }
 
-
 #[test]
 fn zero_capacity() {
     let chonk = Vechonk::<()>::with_capacity(0);
@@ -436,7 +435,6 @@ fn index_mut() {
 
     assert_eq!(chonk[2].value(), 2);
 }
-
 
 #[test]
 #[should_panic]

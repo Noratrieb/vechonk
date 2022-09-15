@@ -123,7 +123,7 @@ impl<T: ?Sized> Vechonk<T> {
         Iter::new(self)
     }
 
-    /// An iterator over the elements yielding [`MutGuard`]s
+    /// An iterator over the elements yielding [`&mut T`]s
     pub fn iter_mut(&mut self) -> IterMut<T> {
         IterMut::new(self)
     }

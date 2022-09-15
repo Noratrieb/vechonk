@@ -94,6 +94,7 @@ impl<T: ?Sized> Vechonk<T> {
         self.raw.pop()
     }
 
+    #[cfg(any())]
     pub fn insert(&mut self, _index: usize, _element: Box<T>) {
         todo!()
     }
@@ -103,6 +104,7 @@ impl<T: ?Sized> Vechonk<T> {
     /// Even worse, after all the copying, it might realloc anyways because it couldn't fit in the space.
     ///
     /// Returns the old element at that
+    #[cfg(any())]
     pub fn replace(&mut self, _index: usize, _element: Box<T>) -> Box<T> {
         todo!()
     }
@@ -162,17 +164,6 @@ impl<T: ?Sized> Vechonk<T> {
         //         The pointer is calculated from the offset, which is also valid
         //         The pointer is aligned, because it has been aligned manually in `Self::push`
         unsafe { &*self.raw.get_unchecked_ptr(index) }
-    }
-
-    /// used for debugging memory layout
-    /// safety: cap must be 96
-    #[allow(dead_code)]
-    #[doc(hidden)]
-    #[cfg(debug_assertions)]
-    pub unsafe fn debug_chonk(&self) {
-        let array = unsafe { *(self.raw.ptr.as_ptr() as *mut [u8; 96]) };
-
-        panic!("{:?}", array)
     }
 }
 

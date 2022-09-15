@@ -65,10 +65,7 @@ impl<T: ?Sized> RawVechonk<T> {
             return vechonk;
         }
 
-        // SAFETY: capacity has been checked to not be 0 and the len is 0
-        unsafe {
-            vechonk.realloc(NonZeroUsize::new_unchecked(capacity));
-        }
+        vechonk.reset_alloc(NonZeroUsize::new(capacity).unwrap());
         vechonk
     }
 
@@ -290,71 +287,26 @@ impl<T: ?Sized> RawVechonk<T> {
     }
 
     fn regrow(&mut self, min_size: NonZeroUsize) {
-        // new_cap must be properly "aligned" for `PtrData<T>`
+        // We just create a new one and copy all elements over.
+        // This is because it's almost impossible to copy around the alignment properly,
+        // as we need to dynamically align each element, and the alignment of our allocation
+        // might have decreased after the realloc.
+
         let new_cap = force_align(min_size.get() * 2, Self::data_align());
 
-        let old_ptr = self.ptr.as_ptr();
-        let old_cap = self.cap;
-
-        let last_data_index = self.len.saturating_sub(1);
-        let old_data_offset = self.offset_for_data(last_data_index);
-
-        // SAFETY: `min_size` was already non-zero
-        //         We will copy the elements over
-        unsafe {
-            self.realloc(NonZeroUsize::new_unchecked(new_cap));
-        }
-
-        // copy the elements first
-        // SAFETY: both pointers point to the start of allocations smaller than `self.elem_size` and own them
-        unsafe {
-            ptr::copy_nonoverlapping::<u8>(old_ptr, self.ptr.as_ptr(), self.elem_size);
-        }
-
-        // then copy the data
-        // SAFETY: both pointers have been offset by less than `self.cap`, and the `data_section_size` fills the allocation perfectly
-        unsafe {
-            let new_data_ptr = self.ptr.as_ptr().add(self.offset_for_data(last_data_index));
-
-            ptr::copy_nonoverlapping::<u8>(
-                old_ptr.add(old_data_offset),
-                new_data_ptr,
-                self.data_section_size(),
-            )
-        }
-
-        // now free the old data
-        // SAFETY: This was previously allocated and is not used anymore
-        unsafe {
-            Self::dealloc(old_cap, old_ptr);
-        }
+        let new = RawVechonk::with_capacity(new_cap);
+        let old = mem::replace(self, new);
+        crate::IntoIter::from_raw(old).for_each(|e| {
+            self.push(e);
+        });
     }
 
-    /// Reallocs the `Vechonk`, setting its capacity to `size`. This will not copy any elements. This will put the `Vechonk`
-    /// into an invalid state, since the `len` is still the length of the elements in the old allocation.
-    ///
-    /// This doesn't free any memory
-    ///
-    /// # Safety
-    /// The caller must either set the `len` to zero, or copy the elements to the new allocation by saving
-    /// `self.ptr` before calling this function.
-    unsafe fn realloc(&mut self, size: NonZeroUsize) {
-        // TODO this is *not* sound, since the alignment of some big elements might be wrong now
-
+    /// Allocates the `Vechonk`, setting its capacity to `size`.
+    fn reset_alloc(&mut self, size: NonZeroUsize) {
         let layout = Layout::from_size_align(size.get(), Self::data_align()).unwrap();
 
         // SAFETY: layout is guaranteed to have a non-zero size
-        let alloced_ptr;
-
-        // we only care about it being zeroed for debugging since it makes it easier
-        #[cfg(debug_assertions)]
-        unsafe {
-            alloced_ptr = alloc::alloc::alloc_zeroed(layout)
-        }
-        #[cfg(not(debug_assertions))]
-        unsafe {
-            alloced_ptr = alloc::alloc::alloc(layout)
-        }
+        let alloced_ptr = unsafe { alloc::alloc::alloc(layout) };
 
         self.ptr =
             NonNull::new(alloced_ptr).unwrap_or_else(|| alloc::alloc::handle_alloc_error(layout));

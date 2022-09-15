@@ -1,7 +1,7 @@
 use crate::{RawVechonk, Vechonk};
 use alloc::boxed::Box;
 use core::marker::PhantomData;
-use core::mem;
+use core::mem::ManuallyDrop;
 
 /// An iterator over the elements of a [`Vechonk`]
 pub struct Iter<'a, T: ?Sized> {
@@ -105,17 +105,20 @@ pub struct IntoIter<T: ?Sized> {
 }
 
 impl<'a, T: ?Sized> IntoIter<T> {
-    pub(super) fn new(chonk: Vechonk<T>) -> IntoIter<T> {
-        let raw = chonk.raw.copy();
-
-        // We don't want to free the memory!
-        mem::forget(chonk);
-
+    pub(crate) fn from_raw(raw: RawVechonk<T>) -> Self {
         Self {
             raw,
             current_index: 0,
             _marker: PhantomData,
         }
+    }
+
+    pub(crate) fn new(chonk: Vechonk<T>) -> IntoIter<T> {
+        // We don't want to free the memory yet!
+        let chonk = ManuallyDrop::new(chonk);
+        let raw = chonk.raw.copy();
+
+        Self::from_raw(raw)
     }
 }
 

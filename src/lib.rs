@@ -1,4 +1,4 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![feature(ptr_metadata)]
 #![feature(unsize)]
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -235,7 +235,7 @@ impl<T> Eq for Vechonk<T> where T: ?Sized + PartialEq + Eq {}
 
 impl<T> PartialOrd for Vechonk<T>
 where
-    T: ?Sized + PartialOrd,
+    T: ?Sized + PartialOrd<T>,
 {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         // see core::slice::cmp::SlicePartialOrd::partial_compare

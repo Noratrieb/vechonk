@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+use core::{cmp::Ordering, hash::Hash};
+
 use crate::{vechonk, Vechonk};
 use alloc::boxed::Box;
 
@@ -12,12 +14,32 @@ trait TakeMut {
 
 impl<T: ?Sized> TakeMut for T {}
 
+trait Decrement {
+    fn decrement(&mut self);
+    fn value(&self) -> usize;
+}
+
+impl Decrement for usize {
+    fn decrement(&mut self) {
+        *self -= 1;
+    }
+    fn value(&self) -> usize {
+        *self
+    }
+}
+
 #[test]
 fn new() {
     let chonk = Vechonk::<()>::new();
-
     assert_eq!(chonk.len(), 0);
 }
+
+#[test]
+fn default() {
+    let chonk = Vechonk::<()>::default();
+    assert_eq!(chonk.len(), 0);
+}
+
 
 #[test]
 fn zero_capacity() {
@@ -313,4 +335,115 @@ fn empty_slice_replace() {
     drop(chonk);
 
     old.take_mut();
+}
+
+#[test]
+fn iter_mut() {
+    fn b(x: usize) -> Box<dyn Decrement> {
+        Box::new(x)
+    }
+
+    let mut chonk: Vechonk<dyn Decrement> = vechonk![b(1), b(2), b(3)];
+
+    chonk.iter_mut().for_each(|elem| elem.decrement());
+
+    chonk.iter().enumerate().for_each(|(i, elem)| {
+        assert_eq!(i, elem.value());
+    });
+}
+
+#[test]
+fn iter_sizes() {
+    let mut chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into(), "owo".into()];
+
+    let iter = chonk.iter();
+    assert_eq!(iter.size_hint(), (3, Some(3)));
+    assert_eq!(iter.len(), 3);
+
+    let iter = chonk.iter_mut();
+    assert_eq!(iter.size_hint(), (3, Some(3)));
+    assert_eq!(iter.len(), 3);
+
+    let iter = chonk.into_iter();
+    assert_eq!(iter.size_hint(), (3, Some(3)));
+    assert_eq!(iter.len(), 3);
+}
+
+#[test]
+fn partial_ord() {
+    fn b(x: u64) -> Box<u64> {
+        Box::new(x)
+    }
+
+    let chonk1 = vechonk![b(4), b(2)];
+    let chonk2 = vechonk![b(4), b(3)];
+
+    assert_eq!(
+        PartialOrd::partial_cmp(&chonk1, &chonk2),
+        Some(Ordering::Less)
+    );
+}
+
+#[test]
+fn ord() {
+    fn b(x: u64) -> Box<u64> {
+        Box::new(x)
+    }
+
+    let chonk1 = vechonk![b(4), b(2)];
+    let chonk2 = vechonk![b(4), b(3)];
+
+    assert_eq!(Ord::cmp(&chonk1, &chonk2), Ordering::Less);
+}
+
+#[test]
+fn hash() {
+    fn hash<H: Hash>(h: H) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        h.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    let chonk1: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+    let chonk2: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    assert_eq!(hash(chonk1), hash(chonk2));
+}
+
+#[test]
+fn get() {
+    let mut chonk: Vechonk<str> = vechonk!["hello".into(), "uwu".into()];
+
+    assert_eq!(chonk.get(0), Some("hello"));
+    assert_eq!(chonk.get(1), Some("uwu"));
+    assert_eq!(chonk.get(2), None);
+    assert_eq!(chonk.get_mut(0).map(|s| &*s), Some("hello"));
+    assert_eq!(chonk.get_mut(1).map(|s| &*s), Some("uwu"));
+    assert_eq!(chonk.get_mut(2).map(|s| &*s), None);
+}
+
+#[test]
+fn index_mut() {
+    fn b(x: usize) -> Box<dyn Decrement> {
+        Box::new(x)
+    }
+
+    let mut chonk: Vechonk<dyn Decrement> = vechonk![b(1), b(2), b(3)];
+    chonk[2].decrement();
+
+    assert_eq!(chonk[2].value(), 2);
+}
+
+
+#[test]
+#[should_panic]
+fn index_mut_out_of_bounds() {
+    fn b(x: usize) -> Box<dyn Decrement> {
+        Box::new(x)
+    }
+
+    let mut chonk: Vechonk<dyn Decrement> = vechonk![b(1), b(2), b(3)];
+
+    chonk[3].decrement();
 }

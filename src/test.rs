@@ -5,6 +5,8 @@ use core::{cmp::Ordering, hash::Hash};
 use crate::{vechonk, Vechonk};
 use alloc::boxed::Box;
 
+const USIZE_BYTES: usize = (usize::BITS / 8) as usize;
+
 #[repr(align(2048))]
 struct BigAlign(u8);
 
@@ -82,7 +84,7 @@ fn push_two_sized_elem() {
 
     assert_eq!(chonk.len(), 2);
     assert_eq!(chonk.raw.elem_size, 2);
-    assert_eq!(chonk.raw.data_section_size(), 16); // two indecies
+    assert_eq!(chonk.raw.data_section_size(), USIZE_BYTES * 2); // two indecies
 }
 
 #[test]
@@ -94,7 +96,7 @@ fn push_two_unsized_elem() {
 
     assert_eq!(chonk.len(), 2);
     assert_eq!(chonk.raw.elem_size, 8);
-    assert_eq!(chonk.raw.data_section_size(), 32); // two indecies + lengths
+    assert_eq!(chonk.raw.data_section_size(), USIZE_BYTES * 4); // two indecies + lengths
 }
 
 #[test]

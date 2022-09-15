@@ -1,5 +1,5 @@
 #![cfg_attr(not(test), no_std)]
-#![feature(ptr_metadata)]
+#![feature(ptr_metadata, strict_provenance)]
 #![feature(unsize)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

@@ -242,7 +242,7 @@ impl<T: ?Sized> RawVechonk<T> {
             // SAFETY: The value has no size, so it's ok for it to be dangling around
             return unsafe {
                 Box::from_raw(ptr::from_raw_parts_mut::<T>(
-                    mem::align_of_val(elem_fat_ref) as *mut (),
+                    ptr::invalid::<()>(mem::align_of_val(elem_fat_ref)) as *mut (),
                     data.meta,
                 ))
             };
